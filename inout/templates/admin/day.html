@@ -1,0 +1,86 @@
+{#
+  Context:
+    day     id, user (display_name), work_date, segments (id, clock_in, clock_out),
+            total_seconds, status, is_open, submitted_at, note
+    audit   newest first: created_at, actor (display_name), detail
+  Times are entered as HH:MM on day.work_date. Leaving "Out" empty keeps the segment open.
+#}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, status with context %}
+{% block title %}{{ day.user.display_name }}, {{ day.work_date|shortdate }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('admin.timesheets') }}">← Back to timesheets</a></p>
+
+<h1>{{ day.user.display_name }}: {{ day.work_date|longdate }}</h1>
+<p class="summary">
+  {{ status(day) }} · {{ day.total_seconds|hm }} total
+  {% if day.submitted_at %} · submitted at {{ day.submitted_at|clock }}{% endif %}
+</p>
+
+{% if day.note %}
+  <p class="note"><strong>Note from {{ day.user.display_name }}:</strong> {{ day.note }}</p>
+{% endif %}
+
+<h2>Times</h2>
+<table class="table edit-table">
+  <thead>
+    <tr><th>In</th><th>Out</th><th class="num">Hours</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for s in day.segments %}
+      <tr>
+        <td><input form="seg-{{ s.id }}" type="time" name="clock_in" value="{{ s.clock_in|hhmm }}" required></td>
+        <td><input form="seg-{{ s.id }}" type="time" name="clock_out" value="{{ s.clock_out|hhmm }}"></td>
+        <td class="num">{{ ((s.clock_out - s.clock_in).total_seconds()|hm) if s.clock_out else 'open' }}</td>
+        <td class="actions">
+          <form id="seg-{{ s.id }}" method="post" action="{{ url_for('admin.segment_save', day_id=day.id) }}" class="inline" data-once>
+            {{ csrf() }}
+            <input type="hidden" name="segment_id" value="{{ s.id }}">
+            <button class="button button-small button-primary" type="submit">Save</button>
+            <button class="button button-small" type="submit" formnovalidate
+                    formaction="{{ url_for('admin.segment_delete', day_id=day.id, segment_id=s.id) }}"
+                    data-confirm="Really delete?">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    <tr>
+      <td><input form="seg-new" type="time" name="clock_in" required></td>
+      <td><input form="seg-new" type="time" name="clock_out"></td>
+      <td></td>
+      <td class="actions">
+        <form id="seg-new" method="post" action="{{ url_for('admin.segment_save', day_id=day.id) }}" class="inline" data-once>
+          {{ csrf() }}
+          <button class="button button-small" type="submit">Add</button>
+        </form>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="muted">Leave "Out" empty to keep someone clocked in.</p>
+
+{% if day.submitted_at %}
+  <form method="post" action="{{ url_for('admin.day_reopen', day_id=day.id) }}" class="submit" data-once>
+    {{ csrf() }}
+    <button class="button" type="submit" data-confirm="Click again to reopen">Reopen day</button>
+    <span class="muted">Unlocks the day so {{ day.user.display_name }} can clock in and submit again.</span>
+  </form>
+{% endif %}
+
+<h2>Change log</h2>
+{% if audit %}
+  <table class="table">
+    <tbody>
+      {% for a in audit %}
+        <tr>
+          <td class="nowrap muted">{{ a.created_at|shortdate }}, {{ a.created_at|clock }}</td>
+          <td class="nowrap">{{ a.actor.display_name }}</td>
+          <td>{{ a.detail }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="muted">No changes yet.</p>
+{% endif %}
+{% endblock %}

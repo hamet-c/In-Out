@@ -1,0 +1,21 @@
+{# Context: username (optional, refills the field after a failed attempt) #}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf with context %}
+{% block title %}Admin sign in{% endblock %}
+{% block content %}
+<section class="box narrow">
+  <h1>Admin sign in</h1>
+  <form method="post" class="form" data-once>
+    {{ csrf() }}
+    <label>Username
+      <input name="username" value="{{ username or '' }}" autocomplete="username"
+             autocapitalize="none" spellcheck="false" required {{ 'autofocus' if not username }}>
+    </label>
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required {{ 'autofocus' if username }}>
+    </label>
+    <button class="button button-primary" type="submit">Sign in</button>
+  </form>
+  <p class="muted"><a href="{{ url_for('clock.dashboard') }}">← Back to the clock</a></p>
+</section>
+{% endblock %}

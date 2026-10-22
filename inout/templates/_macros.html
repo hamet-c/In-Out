@@ -1,0 +1,31 @@
+{% macro csrf() -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{%- endmacro %}
+
+{% macro navlink(endpoint, label, also=[], badge=0) -%}
+  {% set active = request.endpoint == endpoint or request.endpoint in also %}
+  <a href="{{ url_for(endpoint) }}"{% if active %} aria-current="page"{% endif %}>
+    {{- label -}}{% if badge %} <span class="count">{{ badge }}</span>{% endif %}
+  </a>
+{%- endmacro %}
+
+{# day needs: status ('submitted' | 'today' | 'unsubmitted') and is_open (bool) #}
+{% macro status(day) -%}
+  {% if day.is_open and day.status != 'today' %}
+    <span class="status status-bad">Still clocked in</span>
+  {% elif day.status == 'submitted' %}
+    <span class="status">Submitted</span>
+  {% elif day.status == 'today' %}
+    <span class="status status-ok">{{ 'Clocked in' if day.is_open else 'In progress' }}</span>
+  {% else %}
+    <span class="status status-bad">Not submitted</span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro punches(segments) -%}
+  {% for s in segments -%}
+    {{ s.clock_in|clock }} – {{ s.clock_out|clock if s.clock_out else 'now' }}{{ ', ' if not loop.last }}
+  {%- else -%}
+    <span class="muted">None</span>
+  {%- endfor %}
+{%- endmacro %}

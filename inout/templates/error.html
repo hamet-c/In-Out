@@ -1,0 +1,10 @@
+{# Context: code (int), message (str) #}
+{% extends "base.html" %}
+{% block title %}{{ code }}{% endblock %}
+{% block content %}
+<section class="box narrow">
+  <h1>{{ code }}</h1>
+  <p>{{ message }}</p>
+  <p><a href="{{ url_for('clock.dashboard') }}">Back to the clock</a></p>
+</section>
+{% endblock %}

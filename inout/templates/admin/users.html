@@ -1,0 +1,91 @@
+{#
+  Context:
+    pending   people waiting for approval: id, display_name, created_at
+    users     everyone else: id, display_name, username, is_admin, status ('active' | 'disabled'), has_pin
+  Actions post to admin.user_update with an "action" field:
+    approve | reject | disable | enable | set_pin (+ pin)
+  Admin accounts are created with `python manage.py create-admin`.
+#}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf with context %}
+{% block title %}Users{% endblock %}
+
+{% macro action(user, name, label, cls='button button-small') -%}
+  <form method="post" action="{{ url_for('admin.user_update', user_id=user.id) }}" class="inline" data-once>
+    {{ csrf() }}
+    <input type="hidden" name="action" value="{{ name }}">
+    <button class="{{ cls }}" type="submit">{{ label }}</button>
+  </form>
+{%- endmacro %}
+
+{% macro pin_field(label='PIN') -%}
+  <label>{{ label }}
+    <input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+           autocomplete="off" title="4 digits" required>
+  </label>
+{%- endmacro %}
+
+{% block content %}
+<h1>Users</h1>
+
+<h2>Waiting for approval</h2>
+{% if pending %}
+  <table class="table">
+    <tbody>
+      {% for u in pending %}
+        <tr>
+          <td>{{ u.display_name }}</td>
+          <td class="muted nowrap">Requested {{ u.created_at|shortdate }}</td>
+          <td class="actions">
+            {{ action(u, 'approve', 'Approve', 'button button-small button-primary') }}
+            {{ action(u, 'reject', 'Reject') }}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="muted">No requests waiting.</p>
+{% endif %}
+
+<h2>Everyone</h2>
+<div class="table-scroll">
+  <table class="table">
+    <thead>
+      <tr><th>Name</th><th>Role</th><th>PIN</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+        <tr>
+          <td>{{ u.display_name }}{% if u.id == current_admin.id %} <span class="muted">(you)</span>{% endif %}</td>
+          <td>{{ 'Admin (' ~ u.username ~ ')' if u.is_admin else 'Employee' }}</td>
+          <td>{{ 'Set' if u.has_pin else '—' }}</td>
+          <td>{% if u.status == 'disabled' %}<span class="status-bad">Disabled</span>{% else %}Active{% endif %}</td>
+          <td class="actions">
+            {% if u.id != current_admin.id %}
+              {% if u.status == 'disabled' %}{{ action(u, 'enable', 'Enable') }}{% else %}{{ action(u, 'disable', 'Disable') }}{% endif %}
+            {% endif %}
+            <details class="inline">
+              <summary class="button button-small">{{ 'Change PIN' if u.has_pin else 'Set PIN' }}</summary>
+              <form method="post" action="{{ url_for('admin.user_update', user_id=u.id) }}" class="popover" data-once>
+                {{ csrf() }}
+                <input type="hidden" name="action" value="set_pin">
+                {{ pin_field('New PIN for ' ~ u.display_name) }}
+                <button class="button button-small button-primary" type="submit">Save</button>
+              </form>
+            </details>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Add an employee</h2>
+<form method="post" action="{{ url_for('admin.create_user') }}" class="box form narrow" data-once>
+  {{ csrf() }}
+  <label>Full name <input name="display_name" maxlength="80" required></label>
+  {{ pin_field('PIN (4 digits, tell them privately)') }}
+  <button class="button button-primary" type="submit">Add employee</button>
+</form>
+{% endblock %}

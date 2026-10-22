@@ -1,0 +1,30 @@
+{# Shown on / when no employee is signed in. Works with a keyboard, a phone keypad or the on-screen pad. #}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf with context %}
+{% block title %}Enter your PIN{% endblock %}
+{% block content %}
+<section class="pin-box">
+  <h1>Enter your PIN</h1>
+  <form method="post" action="{{ url_for('auth.pin') }}" class="pin-form" data-pin-form data-once>
+    {{ csrf() }}
+    <input class="pin-input" type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}"
+           maxlength="4" autocomplete="off" required autofocus aria-label="PIN" data-pin-input>
+    <div class="keypad" aria-hidden="true">
+      {% for key in ['1','2','3','4','5','6','7','8','9'] %}
+        <button type="button" class="key" data-key="{{ key }}" tabindex="-1">{{ key }}</button>
+      {% endfor %}
+      <button type="button" class="key key-muted" data-key="clear" tabindex="-1">Clear</button>
+      <button type="button" class="key" data-key="0" tabindex="-1">0</button>
+      <button type="button" class="key key-muted" data-key="back" tabindex="-1">⌫</button>
+    </div>
+    <button class="button button-primary button-big" type="submit">Go</button>
+  </form>
+  <p class="muted pin-links">
+    <a href="{{ url_for('auth.register') }}">New employee? Request access</a>
+    · <a href="{{ url_for('auth.admin_login') }}">Admin sign in</a>
+  </p>
+  {% if not request.is_secure %}
+    <p class="muted"><a href="{{ url_for('setup.index') }}">Seeing "Not secure"? Set up this device</a></p>
+  {% endif %}
+</section>
+{% endblock %}

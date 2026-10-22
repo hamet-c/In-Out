@@ -1,0 +1,113 @@
+{#
+  The one page employees use, shown after they enter their PIN.
+  Context (plus current_employee from base.html):
+    today           date
+    server_now      datetime (the server's clock; the page ticks forward from it)
+    state           'idle' | 'in' | 'out' | 'submitted'
+    segments        list of objects with clock_in, clock_out (clock_out is None while clocked in)
+    worked_seconds  total of the closed segments
+    total_seconds   worked_seconds plus the open segment so far
+    open_since      datetime of the open segment's clock_in, or None
+    submitted_at    datetime, or None
+    note            the note the employee left when submitting ('' if none)
+    note_max        max note length in characters
+    stale_days      list of earlier dates that were never submitted
+#}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf with context %}
+{% block title %}Clock{% endblock %}
+{% block content %}
+<div class="clock" data-server-now="{{ server_now.isoformat() }}" data-idle-signout="30">
+
+  <div class="hello">
+    <h1>Hi, {{ current_employee.display_name }}</h1>
+    <form method="post" action="{{ url_for('auth.done') }}" data-signout-form>
+      {{ csrf() }}
+      <button class="button" type="submit">Done</button>
+    </form>
+  </div>
+  <p class="muted signout-note">Press Done when you're finished. You'll be signed out automatically
+    <span data-idle-left>after 30 seconds</span> without a tap.</p>
+
+  {% if stale_days %}
+    <p class="message message-warning">
+      Not submitted: {% for d in stale_days %}{{ d|shortdate }}{{ ', ' if not loop.last }}{% endfor %}.
+      Please ask an admin to fix {{ 'it' if stale_days|length == 1 else 'them' }}.
+    </p>
+  {% endif %}
+
+  <p class="today">{{ today|longdate }} · <span data-now>{{ server_now|clock }}</span></p>
+
+  <p class="state">
+    {% if state == 'in' %}
+      <span class="dot"></span> Clocked in since {{ open_since|clock }}
+    {% elif state == 'out' %}
+      Clocked out at {{ segments[-1].clock_out|clock }}
+    {% elif state == 'submitted' %}
+      Day submitted at {{ submitted_at|clock }}. This day is locked.
+    {% else %}
+      Not clocked in
+    {% endif %}
+  </p>
+
+  {% if state != 'submitted' %}
+    <form method="post" action="{{ url_for('clock.punch') }}" data-once>
+      {{ csrf() }}
+      {# Lets the server ignore a stale tab or a double tap #}
+      <input type="hidden" name="expect" value="{{ state }}">
+      {% if state == 'in' %}
+        <button class="button button-big button-danger" type="submit">Clock Out</button>
+      {% else %}
+        <button class="button button-big button-primary" type="submit">Clock In</button>
+      {% endif %}
+    </form>
+  {% endif %}
+
+  {% if state == 'out' %}
+    <form method="post" action="{{ url_for('clock.submit') }}" class="submit-form" data-once>
+      {{ csrf() }}
+      <label><span>Note for your manager <span class="muted">(optional)</span></span>
+        <textarea name="note" rows="3" maxlength="{{ note_max }}"
+                  placeholder="For example: Forgot to clock in, I started at 8:00."></textarea>
+      </label>
+      <div class="submit">
+        <button class="button" type="submit" data-confirm="Click again to submit {{ worked_seconds|hm }}">Submit day</button>
+        <span class="muted">Do this when you're done for the day. It can't be undone.</span>
+      </div>
+    </form>
+  {% endif %}
+
+  {% if state == 'submitted' and note %}
+    <p class="note"><strong>Your note:</strong> {{ note }}</p>
+  {% endif %}
+
+  <h2>Today</h2>
+  <table class="table">
+    <thead>
+      <tr><th>In</th><th>Out</th><th class="num">Hours</th></tr>
+    </thead>
+    <tbody>
+      {% for s in segments %}
+        <tr>
+          <td>{{ s.clock_in|clock }}</td>
+          <td>{{ s.clock_out|clock if s.clock_out else '—' }}</td>
+          {% if s.clock_out %}
+            <td class="num">{{ (s.clock_out - s.clock_in).total_seconds()|hm }}</td>
+          {% else %}
+            <td class="num" data-running="{{ s.clock_in.isoformat() }}">{{ (server_now - s.clock_in).total_seconds()|hm }}</td>
+          {% endif %}
+        </tr>
+      {% else %}
+        <tr><td colspan="3" class="muted">No times yet today.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th colspan="2">Total</th>
+        <th class="num" data-total="{{ worked_seconds }}"{% if open_since %} data-open-since="{{ open_since.isoformat() }}"{% endif %}>{{ total_seconds|hm }}</th>
+      </tr>
+    </tfoot>
+  </table>
+
+</div>
+{% endblock %}

@@ -1,0 +1,26 @@
+{# Context: form (optional; refills the name after an error. PINs are never refilled.) #}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf with context %}
+{% block title %}Request access{% endblock %}
+{% block content %}
+<section class="box narrow">
+  <h1>Request access</h1>
+  <p class="muted">Pick a 4-digit PIN. You'll use it to clock in and out. An admin has to approve you before it works.</p>
+  <form method="post" action="{{ url_for('auth.register') }}" class="form" data-once>
+    {{ csrf() }}
+    <label>Full name
+      <input name="display_name" value="{{ form.display_name if form }}" autocomplete="name" maxlength="80" required autofocus>
+    </label>
+    <label>PIN
+      <input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+             autocomplete="new-password" title="4 digits" required>
+    </label>
+    <label>PIN again
+      <input type="password" name="confirm" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
+             autocomplete="new-password" title="4 digits" required>
+    </label>
+    <button class="button button-primary" type="submit">Send request</button>
+  </form>
+  <p class="muted"><a href="{{ url_for('clock.dashboard') }}">← Back to the clock</a></p>
+</section>
+{% endblock %}

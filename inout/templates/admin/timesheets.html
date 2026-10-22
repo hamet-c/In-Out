@@ -1,0 +1,63 @@
+{#
+  Context:
+    start, end      dates in the filter
+    user_id         selected user id, or None for everyone
+    users           list of objects with id, display_name (for the filter)
+    rows            days in range, each with id, user (display_name), work_date, segments,
+                    total_seconds, status, is_open, note
+    total_seconds   sum over rows
+    attention       number of rows that are not submitted or still clocked in
+#}
+{% extends "base.html" %}
+{% from "_macros.html" import status, punches with context %}
+{% block title %}Timesheets{% endblock %}
+{% block content %}
+<h1>Timesheets</h1>
+
+<form method="get" action="{{ url_for('admin.timesheets') }}" class="filters">
+  <label>From <input type="date" name="start" value="{{ start.isoformat() }}" required></label>
+  <label>To <input type="date" name="end" value="{{ end.isoformat() }}" required></label>
+  <label>Employee
+    <select name="user_id">
+      <option value="">Everyone</option>
+      {% for u in users %}
+        <option value="{{ u.id }}"{{ ' selected' if u.id == user_id }}>{{ u.display_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="button button-primary" type="submit">Show</button>
+  <a class="button" href="{{ url_for('admin.export_csv', start=start.isoformat(), end=end.isoformat(), user_id=user_id or '') }}" download>Export CSV</a>
+</form>
+
+<p class="summary">
+  {{ rows|length }} day{{ 's' if rows|length != 1 }} · {{ total_seconds|hm }} total
+  {% if attention %} · <span class="status-bad">{{ attention }} need{{ 's' if attention == 1 }} attention</span>{% endif %}
+</p>
+
+{% if rows %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr><th>Employee</th><th>Date</th><th>Times</th><th class="num">Hours</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for day in rows %}
+          <tr>
+            <td>{{ day.user.display_name }}</td>
+            <td class="nowrap">{{ day.work_date|shortdate }}</td>
+            <td>
+              {{ punches(day.segments) }}
+              {% if day.note %}<div class="note-inline">Note: {{ day.note }}</div>{% endif %}
+            </td>
+            <td class="num">{{ day.total_seconds|hm }}</td>
+            <td class="nowrap">{{ status(day) }}</td>
+            <td><a href="{{ url_for('admin.day', day_id=day.id) }}">Edit</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted">No time recorded in this range.</p>
+{% endif %}
+{% endblock %}
