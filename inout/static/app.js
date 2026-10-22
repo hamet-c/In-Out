@@ -62,11 +62,13 @@
   }
 
   // ---- Shared screen: sign out after a stretch with no taps or typing --------
+  // Used by the clock page (30 s) and by the admin header (a few minutes).
   var idleHost = document.querySelector("[data-idle-signout]");
-  var signoutForm = document.querySelector("[data-signout-form]");
+  var signoutForm = idleHost && idleHost.querySelector("[data-signout-form]");
   if (idleHost && signoutForm) {
     var limit = Number(idleHost.dataset.idleSignout) || 30;
     var leftEl = idleHost.querySelector("[data-idle-left]");
+    var idleText = leftEl ? leftEl.textContent : "";
     var idleSince = Date.now();
     var reset = function () { idleSince = Date.now(); };
     ["pointerdown", "keydown", "input", "scroll"].forEach(function (type) {
@@ -88,8 +90,9 @@
         return signOut();
       }
       if (leftEl) {
-        leftEl.textContent = left <= 10 ? "in " + left + " second" + (left === 1 ? "" : "s")
-                                        : "after " + limit + " seconds";
+        leftEl.textContent = left <= 10
+          ? (leftEl.dataset.prefix || "in ") + left + " second" + (left === 1 ? "" : "s")
+          : idleText;
       }
     }, 1000);
   }

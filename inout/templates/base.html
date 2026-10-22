@@ -1,7 +1,8 @@
 {#
   Context every page can use:
     current_employee  signed in by PIN: id, display_name (or None)
-    current_admin     signed in with username + password: id, display_name, username (or None)
+    current_admin     signed in with username + password: id, display_name, username (or None);
+                      admin pages sign out after admin_idle_seconds without a tap or key
     pending_count     accounts waiting for approval (only set for admins)
     csrf_token()      global function returning the session's CSRF token
 #}
@@ -24,9 +25,10 @@
         {{ navlink('admin.timesheets', 'Timesheets', also=['admin.day']) }}
         {{ navlink('admin.users', 'Users', badge=pending_count) }}
       </nav>
-      <div class="who">
+      <div class="who" data-idle-signout="{{ admin_idle_seconds }}">
         <span>Admin: {{ current_admin.display_name }}</span>
-        <form method="post" action="{{ url_for('auth.admin_logout') }}">
+        <span class="status-bad" data-idle-left data-prefix="Signing out in "></span>
+        <form method="post" action="{{ url_for('auth.admin_logout') }}" data-signout-form>
           {{ csrf() }}
           <button class="link-button" type="submit">Sign out</button>
         </form>

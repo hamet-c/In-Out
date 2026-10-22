@@ -60,6 +60,7 @@ To allow only this computer (a single shared station), set `INOUT_HOST=127.0.0.1
 
 ### Security notes
 - PINs are stored as keyed hashes, never as the digits themselves.
+- Only one person is signed in per browser. Entering a PIN signs out any admin on that screen, so an admin who walks away can't leave the admin pages open to the next employee. Admin pages also sign out after 5 minutes without a tap or key press.
 - After 5 wrong PINs within 15 minutes, that device is locked out for 5 minutes. A correct PIN doesn't reset the count.
 - Because employees choose their own PINs and PINs must be unique, "that PIN can't be used" reveals that someone else has it. These attempts count toward the lockout above. If that's a concern, have admins assign PINs instead.
 - With `make-certs` done, PINs and passwords travel encrypted (HTTPS). The plain-HTTP port only serves the setup page and the public certificate.

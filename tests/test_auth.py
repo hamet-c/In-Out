@@ -123,3 +123,39 @@ def test_background_sign_out_is_accepted(app, client, make_user):
     r = client.post("/done", data={"csrf_token": token}, content_type="multipart/form-data",
                     follow_redirects=True)
     assert r.status_code == 200 and "Enter your PIN" in r.get_data(as_text=True)
+
+
+def test_entering_a_pin_signs_the_admin_out(client, make_user):
+    # An admin leaves the shared screen signed in; the next person enters their own PIN.
+    make_user("Dana", admin="boss")
+    make_user("Alice", pin="2468")
+    sign_in_admin(client)
+    assert client.get("/admin/").status_code == 200
+    page = sign_in_pin(client, "2468").get_data(as_text=True)
+    assert "Hi, Alice" in page and "Signed out of the admin account" in page
+    assert "Timesheets" not in page
+    assert client.get("/admin/").status_code == 302  # back to the admin sign-in
+
+
+def test_signing_in_as_admin_signs_the_employee_out(client, make_user):
+    make_user("Dana", admin="boss")
+    make_user("Alice", pin="2468")
+    sign_in_pin(client, "2468")
+    sign_in_admin(client)
+    assert "Enter your PIN" in client.get("/").get_data(as_text=True)
+
+
+def test_wrong_pin_does_not_end_the_admin_session(client, make_user):
+    make_user("Dana", admin="boss")
+    sign_in_admin(client)
+    sign_in_pin(client, "1357")
+    assert client.get("/admin/").status_code == 200
+
+
+def test_admin_is_signed_out_after_idling(client, make_user, clock):
+    make_user("Dana", admin="boss")
+    sign_in_admin(client)
+    page = client.get("/admin/").get_data(as_text=True)
+    assert 'data-idle-signout="300"' in page and "data-signout-form" in page
+    clock.value += timedelta(minutes=11)
+    assert client.get("/admin/").status_code == 302

@@ -48,6 +48,7 @@ def create_app(config=None):
             "current_employee": g.get("employee"),
             "current_admin": admin_user,
             "pending_count": auth.pending_count() if admin_user else 0,
+            "admin_idle_seconds": auth.ADMIN_PAGE_IDLE_SECONDS,
         }
 
     messages = {400: "That request didn't look right. Go back and try again.",

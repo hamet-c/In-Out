@@ -2,7 +2,11 @@
 
 Employees sign in with their PIN (later also an NFC card) and are signed out after a short
 idle time, since the same screen may be shared. Admins sign in separately with a username
-and password, and both can be signed in at once on the same browser.
+and password.
+
+Only one person is signed in per browser: a PIN sign-in ends any admin session there, and
+an admin sign-in ends any employee session. Otherwise an admin who walked away from a
+shared screen would leave the admin pages open to the next person who enters a PIN.
 """
 import secrets
 import threading
@@ -20,10 +24,12 @@ from .db import get_db, transaction
 
 bp = Blueprint("auth", __name__)
 
-# The clock page signs itself out after 30 s without a tap (see app.js). These are the
-# server-side backstops in case that script never runs.
+# Pages sign themselves out when idle (see app.js): the clock page after 30 seconds,
+# admin pages after ADMIN_PAGE_IDLE_SECONDS. These are the server-side backstops in case
+# that script never runs.
 EMPLOYEE_IDLE = timedelta(minutes=10)
-ADMIN_IDLE = timedelta(minutes=30)
+ADMIN_IDLE = timedelta(minutes=10)
+ADMIN_PAGE_IDLE_SECONDS = 5 * 60
 
 
 # ---------------------------------------------------------------- wrong-guess lockout
@@ -156,9 +162,22 @@ def sign_in_with(kind, secret):
     if row["status"] == "disabled":
         flash("Your account is disabled. Talk to your manager.", "error")
         return False
+    if session.get("admin_id") is not None:
+        _sign_out_admin()
+        flash("Signed out of the admin account.", "warning")
     session["employee_id"] = row["id"]
     session["employee_seen"] = timesheet.now().isoformat()
     return True
+
+
+def _sign_out_employee():
+    session.pop("employee_id", None)
+    session.pop("employee_seen", None)
+
+
+def _sign_out_admin():
+    session.pop("admin_id", None)
+    session.pop("admin_seen", None)
 
 
 @bp.route("/pin", methods=["POST"])
@@ -169,8 +188,7 @@ def pin():
 
 @bp.route("/done", methods=["POST"])
 def done():
-    session.pop("employee_id", None)
-    session.pop("employee_seen", None)
+    _sign_out_employee()
     return redirect(url_for("clock.dashboard"))
 
 
@@ -226,6 +244,7 @@ def admin_login():
         elif row["status"] != "active":
             flash("This admin account is disabled.", "error")
         else:
+            _sign_out_employee()
             session["admin_id"] = row["id"]
             session["admin_seen"] = timesheet.now().isoformat()
             target = request.args.get("next", "")
@@ -239,8 +258,7 @@ def admin_login():
 
 @bp.route("/admin/logout", methods=["POST"])
 def admin_logout():
-    session.pop("admin_id", None)
-    session.pop("admin_seen", None)
+    _sign_out_admin()
     return redirect(url_for("clock.dashboard"))
 
 
