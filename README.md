@@ -6,39 +6,50 @@ Everything runs on **one computer at your workplace**. Nothing is sent to the in
 
 ## Setting up the server computer
 
-You need Python 3.12 or newer on the computer that will run In-Out.
+1. **Install Python 3.10 or newer** from python.org. In the installer, tick **"Add python.exe to PATH"**.
+2. **Copy this folder** to the server computer, somewhere like `C:\In-Out`. Leave out `.venv` and `instance`, and don't use a OneDrive folder, because syncing can corrupt the database.
+3. **Double-click `Setup In-Out.bat`.** It walks you through each step:
+   - installs In-Out's components,
+   - creates the database and your admin account (name, username, password, and an optional clock-in PIN),
+   - sets up secure connections (HTTPS),
+   - trusts the certificate on this computer (Windows asks you to confirm),
+   - adds the firewall rule so phones can connect (Windows asks for admin permission),
+   - turns on auto-start at login and puts an **In-Out** icon on the desktop,
+   - starts In-Out.
 
+You can run the setup again at any time. Finished steps are skipped, and it refreshes the certificate if the computer's address has changed.
+
+**No internet on that computer?** On a computer that has internet, run `pip download -r requirements.txt -d vendor` and copy the `vendor` folder in with the rest. The setup installs from it automatically.
+
+## Running it
+
+- **In-Out icon on the desktop** (or `Start In-Out.bat`): starts In-Out in the background if it isn't running yet, and opens the clock in the browser. There's no window to close by accident.
+- **`Stop In-Out.bat`**: stops it.
+- **Auto-start:** if you turned it on, In-Out starts by itself whenever you log in to this computer. To turn it off, run the setup again and answer "n", or delete `In-Out.cmd` from the Startup folder (Win+R, then `shell:startup`).
+- **Log:** messages go to `instance\server.log`.
+
+When it starts, it shows the addresses to use, such as `https://192.168.1.50:8443` for daily use and `http://192.168.1.50:8000` for setting up a new device.
+
+Auto-start runs when this computer's user logs in, not before. If the server computer reboots, someone needs to log in, or set up automatic sign-in for that account.
+
+### So other devices can reach it
+1. **Firewall:** the setup adds a rule named "In-Out" that allows only local-network addresses. To add it by hand, run this in an admin PowerShell:
+   `New-NetFirewallRule -DisplayName 'In-Out' -Direction Inbound -Protocol TCP -LocalPort 8000,8443 -Action Allow -Profile Any -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`
+2. **Fixed address:** in your router's settings, reserve this computer's IP address (often called a "DHCP reservation"). On a school or company network, ask IT. That keeps the address, and everyone's bookmarks, from changing.
+3. **The Wi-Fi must let devices reach each other.** Guest and campus networks (such as eduroam) usually block this ("client isolation"), and then phones can't reach the server at all. Use the main staff network, or ask IT to allow devices to reach this computer on ports 8000 and 8443.
+
+To allow only this computer (a single shared station), set `INOUT_HOST=127.0.0.1` before running. `INOUT_PORT` (default 8000) and `INOUT_HTTPS_PORT` (default 8443) change the ports.
+
+### Doing it by hand instead
 ```
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python manage.py init-db
 .venv\Scripts\python manage.py create-admin
 .venv\Scripts\python manage.py make-certs
-```
-
-`create-admin` asks for a name, a username and a password, which are used for the admin pages. It also asks for an optional clock-in PIN, if the admin clocks in too.
-
-`make-certs` sets up HTTPS, so there are no "Not secure" warnings (see **Secure connections** below).
-
-**No internet on that computer?** On a computer that has internet, run `pip download -r requirements.txt -d vendor` and copy the `vendor` folder over. Then install with `.venv\Scripts\pip install --no-index -f vendor -r requirements.txt`.
-
-## Running it
-
-```
 .venv\Scripts\python run.py
 ```
-
-It prints the addresses to use, such as `https://192.168.1.50:8443` for daily use and `http://192.168.1.50:8000` for setting up a new device. Keep this window open while people need to clock in.
-
-### So other devices can reach it
-1. **Windows Firewall:** the first time you run it, Windows asks whether to allow Python on networks. Choose **Private networks**. If you missed the prompt, run this once in an admin PowerShell:
-   `New-NetFirewallRule -DisplayName "In-Out" -Direction Inbound -Protocol TCP -LocalPort 8000,8443 -Action Allow -Profile Private`
-2. **Fixed address:** in your router's settings, reserve this computer's IP address (often called a "DHCP reservation"). That keeps the address, and everyone's bookmarks, from changing.
-3. **Start automatically (optional):** in Task Scheduler, create a task that runs `.venv\Scripts\python.exe run.py` at log-on, with "Start in" set to this folder.
-
-4. **The Wi-Fi must let devices reach each other.** Guest and campus networks (such as eduroam) usually block this ("client isolation"), and then phones can't reach the server at all. Use the main staff network.
-
-To allow only this computer (a single shared station), set `INOUT_HOST=127.0.0.1` before running. `INOUT_PORT` (default 8000) and `INOUT_HTTPS_PORT` (default 8443) change the ports.
+`run.py` on its own runs in that window (Ctrl+C stops it). `run.py --background`, `--stop` and `--open` are what the .bat files use.
 
 ## Secure connections (HTTPS)
 
