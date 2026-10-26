@@ -29,7 +29,8 @@ from pathlib import Path
 from cheroot import wsgi
 from cheroot.ssl.builtin import BuiltinSSLAdapter
 
-from inout import certs, create_app
+from inout import certs, create_app, migrations
+from inout.db import get_db
 
 HERE = Path(__file__).resolve().parent
 HOST = os.environ.get("INOUT_HOST", "0.0.0.0")
@@ -189,6 +190,15 @@ def open_browser():
 
 # ---------------------------------------------------------------- main
 
+def check_database(app):
+    """Refuse to run code and data from different versions of In-Out."""
+    with app.app_context():
+        try:
+            migrations.check(get_db())
+        except migrations.VersionMismatch as e:
+            raise SystemExit(str(e))
+
+
 def serve(log=None, pidfile=None):
     if log:
         # pythonw has no console, so everything goes to the log file instead.
@@ -197,6 +207,7 @@ def serve(log=None, pidfile=None):
     app = create_app()
     if not Path(app.config["DATABASE"]).exists():
         raise SystemExit("No database yet. Run: python manage.py init-db")
+    check_database(app)
     servers, info = build_servers(app, HOST, HTTP_PORT, HTTPS_PORT)
     if pidfile:
         Path(pidfile).write_text(str(os.getpid()))

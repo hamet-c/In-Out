@@ -7,8 +7,13 @@ Everything runs on **one computer at your workplace**. Nothing is sent to the in
 ## Setting up the server computer
 
 1. **Install Python 3.10 or newer** from python.org. In the installer, tick **"Add python.exe to PATH"**.
-2. **Copy this folder** to the server computer, somewhere like `C:\In-Out`. Leave out `.venv` and `instance`, and don't use a OneDrive folder, because syncing can corrupt the database.
-3. **Double-click `Setup In-Out.bat`.** It walks you through each step:
+2. **Install Git for Windows** from git-scm.com (the default options are fine).
+3. **Download In-Out with git.** Open PowerShell and run:
+   ```
+   git clone https://github.com/hamet-c/In-Out.git C:\In-Out
+   ```
+   Use a plain folder like `C:\In-Out`, not a OneDrive folder, because syncing can corrupt the database. Installing with git (rather than copying files) is what lets **Update In-Out.bat** work later.
+4. **Double-click `Setup In-Out.bat`** in that folder. It walks you through each step:
    - installs In-Out's components,
    - creates the database and your admin account (name, username, password, and an optional clock-in PIN),
    - sets up secure connections (HTTPS),
@@ -21,10 +26,35 @@ You can run the setup again at any time. Finished steps are skipped, and it refr
 
 **No internet on that computer?** On a computer that has internet, run `pip download -r requirements.txt -d vendor` and copy the `vendor` folder in with the rest. The setup installs from it automatically.
 
+## Updating
+
+New versions are pushed to GitHub from the development laptop. To install one on the server, **double-click `Update In-Out.bat`**. It:
+
+1. checks GitHub, and stops right there with "Already up to date" if nothing is new,
+2. lists what changed, then stops In-Out,
+3. backs up the database to `instance\backups\` (the newest 30 are kept),
+4. downloads the new version (`git pull`),
+5. installs any new components and upgrades the database if needed,
+6. starts In-Out again.
+
+Your data (`instance` folder: database, certificates, settings) is never touched by updates. Devices don't need to be set up again.
+
+**If something goes wrong**, the update stops and prints the exact steps to go back: copy the backup over the database, return the code to the previous version with `git reset --hard <version>`, and start In-Out. The server also refuses to start if the database and code versions don't match, instead of running with mismatched data.
+
+**It refuses to update if files on the server were edited by hand**, so an update can never silently overwrite someone's change. Make changes on the laptop and push them instead.
+
+**Private repository:** if the GitHub repository is private, the first update opens a GitHub sign-in window. Sign in with an account that can read the repository, and Windows remembers it. A read-only access token works too, and is safer than a personal login on a shared computer.
+
+### Releasing a new version (on the laptop)
+1. Make the change and run the tests: `.venv\Scripts\python -m pytest`
+2. If the change alters the database structure, add an upgrade step (see the top of `inout/migrations.py`).
+3. Commit and `git push`. Then run **Update In-Out.bat** on the server.
+
 ## Running it
 
 - **In-Out icon on the desktop** (or `Start In-Out.bat`): starts In-Out in the background if it isn't running yet, and opens the clock in the browser. There's no window to close by accident.
 - **`Stop In-Out.bat`**: stops it.
+- **`Update In-Out.bat`**: installs the newest version from GitHub (see **Updating**).
 - **Auto-start:** if you turned it on, In-Out starts by itself whenever you log in to this computer. To turn it off, run the setup again and answer "n", or delete `In-Out.cmd` from the Startup folder (Win+R, then `shell:startup`).
 - **Log:** messages go to `instance\server.log`.
 
