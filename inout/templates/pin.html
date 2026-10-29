@@ -23,8 +23,5 @@
     <a href="{{ url_for('auth.register') }}">New employee? Request access</a>
     · <a href="{{ url_for('auth.admin_login') }}">Admin sign in</a>
   </p>
-  {% if not request.is_secure %}
-    <p class="muted"><a href="{{ url_for('setup.index') }}">Seeing "Not secure"? Set up this device</a></p>
-  {% endif %}
 </section>
 {% endblock %}

@@ -1,21 +1,23 @@
-"""Windows integration for "Setup In-Out.bat": trust the certificate on this computer,
-open the firewall, start at login and put an icon on the desktop.
+"""Windows integration for "Setup In-Out.bat": open the firewall, start at login and
+put an icon on the desktop.
 
-Every change can be undone. The firewall rule and the certificate show up under their
-"In-Out" names in Windows, the auto-start entry is one file in the Startup folder, and
-the icon is a normal shortcut.
+Every change can be undone. The firewall rule shows up under its "In-Out" name in
+Windows, the auto-start entry is one file in the Startup folder, and the icon is a
+normal shortcut.
 """
 import base64
 import os
 import subprocess
 from pathlib import Path
 
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes
-
 HERE = Path(__file__).resolve().parent
 FIREWALL_RULE = "In-Out"
 PRIVATE_RANGES = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+# Wording for the setup wizard (linuxtools has its own).
+ADMIN_PROMPT = "Windows will ask for admin permission."
+BY_HAND = "run this in an admin PowerShell:"
+ICON_QUESTION = "Put an In-Out icon on the desktop?"
 
 
 def _powershell(script, elevated=False):
@@ -33,28 +35,12 @@ def _ps_quote(text):
     return "'" + str(text).replace("'", "''") + "'"
 
 
-# ---------------------------------------------------------------- certificate trust
-
-def _thumbprint(ca_cert_path):
-    cert = x509.load_pem_x509_certificate(Path(ca_cert_path).read_bytes())
-    return cert.fingerprint(hashes.SHA1()).hex().upper()
-
-
-def ca_is_trusted(ca_cert_path):
-    """Whether this Windows user already trusts the In-Out certificate authority."""
-    r = subprocess.run(["certutil", "-user", "-store", "Root", _thumbprint(ca_cert_path)],
-                       capture_output=True, text=True)
-    return r.returncode == 0
-
-
-def trust_ca(ca_cert_path):
-    """Add the CA to this user's trusted roots. Windows asks the user to confirm."""
-    subprocess.run(["certutil", "-user", "-addstore", "Root", str(ca_cert_path)],
-                   capture_output=True, text=True)
-    return ca_is_trusted(ca_cert_path)
-
-
 # ---------------------------------------------------------------- firewall
+
+def active_firewall():
+    """The firewall in the way. Windows always has one."""
+    return "Windows Firewall"
+
 
 def firewall_rule_exists():
     r = subprocess.run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={FIREWALL_RULE}"],
@@ -62,16 +48,16 @@ def firewall_rule_exists():
     return r.returncode == 0
 
 
-def firewall_command(http_port, https_port):
+def firewall_command(port):
     """The rule, as a command people can also run by hand. Only private (local network)
     addresses may connect, never the internet."""
     return (f"New-NetFirewallRule -DisplayName '{FIREWALL_RULE}' -Direction Inbound -Protocol TCP "
-            f"-LocalPort {http_port},{https_port} -Action Allow -Profile Any "
+            f"-LocalPort {port} -Action Allow -Profile Any "
             f"-RemoteAddress {PRIVATE_RANGES}")
 
 
-def add_firewall_rule(http_port, https_port):
-    _powershell(firewall_command(http_port, https_port), elevated=True)
+def add_firewall_rule(port):
+    _powershell(firewall_command(port), elevated=True)
     return firewall_rule_exists()
 
 

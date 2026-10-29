@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flask import Flask, g, render_template
 
-from . import admin, auth, clock, filters, setup
+from . import admin, auth, clock, filters
 from .auth import AttemptLimiter
 from .db import close_db
 
@@ -64,5 +64,4 @@ def create_app(config=None):
     app.register_blueprint(auth.bp)
     app.register_blueprint(clock.bp)
     app.register_blueprint(admin.bp)
-    app.register_blueprint(setup.bp)
     return app

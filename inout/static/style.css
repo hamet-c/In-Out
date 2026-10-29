@@ -229,11 +229,3 @@ details > summary::-webkit-details-marker { display: none; }
 .hello { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .hello h1 { margin: 0; }
 .signout-note { margin: 4px 0 18px; font-size: 0.9rem; }
-
-/* Device setup page */
-.setup { max-width: 640px; }
-.steps { margin: 8px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; }
-.steps > summary { cursor: pointer; font-weight: 600; }
-.steps ol { margin: 10px 0 4px; padding-left: 20px; }
-.steps li { margin-bottom: 6px; }
-code { padding: 1px 5px; border-radius: 4px; background: var(--soft); font-size: 0.9em; }

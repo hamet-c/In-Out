@@ -5,99 +5,77 @@
     python run.py --stop          stop the background server
     python run.py --open          open In-Out in this computer's browser
 
-"Start In-Out.bat" and "Stop In-Out.bat" use these.
+"Start In-Out.bat" and "Stop In-Out.bat" use these (start-inout.sh and stop-inout.sh on Linux).
 
-Once HTTPS is set up (python manage.py make-certs):
-    https://<this computer>:8443   In-Out itself            (INOUT_HTTPS_PORT)
-    http://<this computer>:8000    device setup page only   (INOUT_PORT)
-Before that, In-Out runs on plain http://<this computer>:8000.
-
+In-Out runs on http://<this computer>:8000 (INOUT_PORT).
 INOUT_HOST=127.0.0.1 allows only this computer to connect.
 """
 import argparse
 import atexit
+import ipaddress
 import os
+import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
 import webbrowser
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 from cheroot import wsgi
-from cheroot.ssl.builtin import BuiltinSSLAdapter
 
-from inout import certs, create_app, migrations
+from inout import create_app, migrations
 from inout.db import get_db
 
 HERE = Path(__file__).resolve().parent
 HOST = os.environ.get("INOUT_HOST", "0.0.0.0")
 HTTP_PORT = int(os.environ.get("INOUT_PORT", "8000"))
-HTTPS_PORT = int(os.environ.get("INOUT_HTTPS_PORT", "8443"))
 LOG_MAX_BYTES = 1_000_000
+PRIVATE_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
+# What people run on this computer, for messages that tell them what to do.
+SETUP_SCRIPT = '"Setup In-Out.bat"' if sys.platform == "win32" else "./setup-inout.sh"
+START_SCRIPT = '"Start In-Out.bat"' if sys.platform == "win32" else "./start-inout.sh"
 
 
-def setup_only(app):
-    """The plain-HTTP side once HTTPS is on. Every address shows the device setup page,
-    so the only thing ever sent unencrypted is the public certificate."""
-    def wsgi_app(environ, start_response):
-        path = environ.get("PATH_INFO", "")
-        if path != "/setup/ca.crt" and not path.startswith("/static/"):
-            environ = {**environ, "PATH_INFO": "/setup", "QUERY_STRING": ""}
-        return app(environ, start_response)
-    return wsgi_app
-
-
-def build_servers(app, host, http_port, https_port):
-    """Returns (servers, cert_status). cert_status is None when running plain HTTP."""
-    p = certs.paths(app.instance_path)
-    info = certs.status(p)
-    if info is None:
-        return [wsgi.Server((host, http_port), app, numthreads=8)], None
-    app.config.update(HTTPS_PORT=https_port, SESSION_COOKIE_SECURE=True)
-    secure = wsgi.Server((host, https_port), app, numthreads=8)
-    secure.ssl_adapter = BuiltinSSLAdapter(str(p.cert), str(p.key))
-    plain = wsgi.Server((host, http_port), setup_only(app), numthreads=2)
-    return [secure, plain], info
-
-
-def serve_forever(servers):
-    for s in servers:
-        s.prepare()  # binds the port now, so "port in use" fails here with a clear error
-    threads = [threading.Thread(target=s.serve, daemon=True) for s in servers]
-    for t in threads:
-        t.start()
+def serve_forever(server):
+    server.prepare()  # binds the port now, so "port in use" fails here with a clear error
+    thread = threading.Thread(target=server.serve, daemon=True)
+    thread.start()
     try:
-        while all(t.is_alive() for t in threads):
+        while thread.is_alive():
             time.sleep(0.5)
     except KeyboardInterrupt:
         pass
     finally:
-        for s in servers:
-            s.stop()
+        server.stop()
 
 
-def describe(info, host):
-    """What to tell people: addresses and any certificate warnings."""
-    lan = [ip for ip in certs.local_ips() if ip != "127.0.0.1"] if host == "0.0.0.0" else []
-    if info is None:
-        lines = [f"In-Out is running (plain HTTP). On this computer: http://127.0.0.1:{HTTP_PORT}"]
-        lines += [f"  From phones and other computers: http://{ip}:{HTTP_PORT}" for ip in lan]
-        lines.append("Tip: run `python manage.py make-certs` to remove the 'Not secure' warnings.")
-        return lines
-    lines = [f"In-Out is running. On this computer: https://localhost:{HTTPS_PORT}"]
-    for ip in lan:
-        lines.append(f"  From phones and other computers: https://{ip}:{HTTPS_PORT}")
-        lines.append(f"  First time on a device? Open http://{ip}:{HTTP_PORT} to set it up.")
-    missing = [ip for ip in lan if ip not in info.ips]
-    if missing:
-        lines.append(f"WARNING: the certificate doesn't cover {', '.join(missing)}. Devices will see a "
-                     "warning there. Run `python manage.py make-certs` (phones need no changes) and restart.")
-    if info.expires - datetime.now(timezone.utc) < timedelta(days=30):
-        lines.append(f"WARNING: the certificate expires {info.expires:%Y-%m-%d}. "
-                     "Run `python manage.py make-certs` and restart.")
+def local_ips():
+    """This computer's local-network IPv4 addresses, the ones phones and other computers use."""
+    found = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            found.add(info[4][0])
+    except OSError:
+        pass
+    try:
+        # Connecting a UDP socket sends nothing; it only picks the outgoing interface.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            found.add(s.getsockname()[0])
+    except OSError:
+        pass
+    private = (ip for ip in found if any(ipaddress.ip_address(ip) in net for net in PRIVATE_NETS))
+    return sorted(private, key=ipaddress.ip_address)
+
+
+def describe(host):
+    """What to tell people: the addresses to use."""
+    lines = [f"In-Out is running. On this computer: http://127.0.0.1:{HTTP_PORT}"]
+    if host == "0.0.0.0":
+        lines += [f"  From phones and other computers: http://{ip}:{HTTP_PORT}" for ip in local_ips()]
     return lines
 
 
@@ -126,9 +104,15 @@ def is_running():
 
 def _is_python_process(pid):
     """Guards --stop against a stale pid file whose number now belongs to another program."""
-    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                         capture_output=True, text=True).stdout.lower()
-    return "python" in out
+    if sys.platform == "win32":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True).stdout
+    else:
+        try:
+            out = Path(f"/proc/{pid}/cmdline").read_text(errors="replace")
+        except OSError:  # no such process
+            return False
+    return "python" in out.lower()
 
 
 def start_background():
@@ -136,7 +120,7 @@ def start_background():
         print("In-Out is already running.")
         return 0
     if not Path(create_app().config["DATABASE"]).exists():
-        print("No database yet. Run \"Setup In-Out.bat\" first.")
+        print(f"No database yet. Run {SETUP_SCRIPT} first.")
         return 1
     log = _logfile()
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -147,13 +131,14 @@ def start_background():
     flags = 0
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    # On Linux, a session of its own means closing the terminal that started it doesn't stop it.
     subprocess.Popen([str(exe), str(HERE / "run.py"), "--log", str(log), "--pidfile", str(_pidfile())],
-                     cwd=HERE, creationflags=flags, close_fds=True,
+                     cwd=HERE, creationflags=flags, close_fds=True, start_new_session=sys.platform != "win32",
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(30):
         time.sleep(0.5)
         if is_running():
-            print("\n".join(describe(certs.status(certs.paths(_instance())), HOST)))
+            print("\n".join(describe(HOST)))
             return 0
     print(f"In-Out didn't start. The end of {log}:")
     print("".join(log.read_text(encoding="utf-8", errors="replace").splitlines(True)[-15:]))
@@ -170,21 +155,28 @@ def stop_background():
             return 1
         print("In-Out isn't running.")
         return 0
-    subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:  # it ended on its own just now
+            pass
     pidfile.unlink(missing_ok=True)
     for _ in range(20):
         if not is_running():
             print("In-Out stopped.")
             return 0
         time.sleep(0.25)
-    print("In-Out didn't stop. Restart the computer or end it in Task Manager.")
+    if sys.platform == "win32":
+        print("In-Out didn't stop. Restart the computer or end it in Task Manager.")
+    else:
+        print(f"In-Out didn't stop. End it with: kill -9 {pid}")
     return 1
 
 
 def open_browser():
-    has_https = certs.status(certs.paths(_instance())) is not None
-    url = f"https://localhost:{HTTPS_PORT}/" if has_https else f"http://127.0.0.1:{HTTP_PORT}/"
-    webbrowser.open(url)
+    webbrowser.open(f"http://127.0.0.1:{HTTP_PORT}/")
     return 0
 
 
@@ -208,14 +200,14 @@ def serve(log=None, pidfile=None):
     if not Path(app.config["DATABASE"]).exists():
         raise SystemExit("No database yet. Run: python manage.py init-db")
     check_database(app)
-    servers, info = build_servers(app, HOST, HTTP_PORT, HTTPS_PORT)
+    server = wsgi.Server((HOST, HTTP_PORT), app, numthreads=8)
     if pidfile:
         Path(pidfile).write_text(str(os.getpid()))
         atexit.register(lambda: Path(pidfile).unlink(missing_ok=True))
-    print("\n".join(describe(info, HOST)))
+    print("\n".join(describe(HOST)))
     if not log:
         print("Press Ctrl+C to stop.")
-    serve_forever(servers)
+    serve_forever(server)
 
 
 def main():

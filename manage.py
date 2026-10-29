@@ -2,8 +2,7 @@
 
     python manage.py init-db        create instance/inout.db (once)
     python manage.py create-admin   add an admin who can sign in to the admin pages
-    python manage.py make-certs     set up HTTPS (again after the server's IP changes)
-    python manage.py setup          guided setup of all of the above, plus Windows extras
+    python manage.py setup          guided setup of both of the above, plus Windows or Linux extras
     python manage.py migrate        upgrade the database after new code arrives
     python manage.py backup         copy the database to instance/backups/
     python manage.py update         pull the latest version from GitHub and apply it
@@ -18,7 +17,7 @@ from pathlib import Path
 from flask import current_app
 from werkzeug.security import generate_password_hash
 
-from inout import certs, create_app, credentials, migrations, timesheet
+from inout import create_app, credentials, migrations, timesheet
 from inout.db import backup, get_db, init_db, transaction
 
 
@@ -108,21 +107,6 @@ def cmd_create_admin(_args):
     print(f"Admin {username} created.")
 
 
-def cmd_make_certs(args):
-    p = certs.paths(current_app.instance_path)
-    _, _, created = certs.ensure_ca(p)
-    try:
-        ips = certs.issue_server_cert(p, certs.local_ips() + args.ip)
-    except ValueError as e:
-        sys.exit(str(e))
-    if created:
-        print("Created the In-Out certificate authority. Each device needs to trust it once.")
-    else:
-        print("Reused the existing certificate authority. Devices that already trust it need no changes.")
-    print("Server certificate covers: " + ", ".join(ips))
-    print("Restart run.py to use it. Keep instance/certs/ca.key private and backed up.")
-
-
 def cmd_migrate(_args):
     db = get_db()
     applied = migrations.upgrade(db)
@@ -188,7 +172,7 @@ def cmd_update(_args):
         "\nTo go back to the version that worked:\n"
         f"  1. Copy {saved} over {current_app.config['DATABASE']}\n"
         f"  2. In this folder run: git reset --hard {old}\n"
-        "  3. Run \"Start In-Out.bat\"")
+        f"  3. Run {run.START_SCRIPT}")
 
     if _git("pull", "--ff-only", "--quiet", capture=False).returncode != 0:
         print("Couldn't apply the update. Nothing was changed; restarting the current version.")
@@ -220,9 +204,9 @@ def _yes(question, default=True):
 
 
 def cmd_setup(_args):
-    """The guided setup behind "Setup In-Out.bat". Safe to run again; finished steps are skipped."""
+    """The guided setup behind "Setup In-Out.bat" and setup-inout.sh. Safe to run again;
+    finished steps are skipped."""
     import run
-    import wintools
 
     step = iter(range(1, 10))
     print("\n=== In-Out setup ===")
@@ -243,62 +227,53 @@ def cmd_setup(_args):
         print("   This is who signs in to the admin pages.")
         cmd_create_admin(None)
 
-    print(f"\n{next(step)}. Secure connection (HTTPS)")
-    cmd_make_certs(argparse.Namespace(ip=[]))
-
-    if sys.platform != "win32":
-        print("\nThe remaining steps are for Windows. Start In-Out with: python run.py")
+    if sys.platform == "win32":
+        import wintools as tools
+    elif sys.platform.startswith("linux"):
+        import linuxtools as tools
+    else:
+        print("\nThe remaining steps are for Windows and Linux. Start In-Out with: python run.py")
         return
 
-    ca = certs.paths(current_app.instance_path).ca_cert
-    print(f"\n{next(step)}. Trust the certificate on this computer")
-    if wintools.ca_is_trusted(ca):
-        print("   Already trusted.")
-    elif _yes("   Trust it now, so this computer's browser shows a padlock? Windows will ask you to confirm."):
-        print("   Done." if wintools.trust_ca(ca) else "   Not added. You can do it later from the setup page.")
-
-    print(f"\n{next(step)}. Let phones and other computers connect (Windows Firewall)")
-    if wintools.firewall_rule_exists():
-        print(f"   A firewall rule named \"{wintools.FIREWALL_RULE}\" already exists.")
-    elif _yes("   Add the rule now? Windows will ask for admin permission."):
-        if wintools.add_firewall_rule(run.HTTP_PORT, run.HTTPS_PORT):
+    print(f"\n{next(step)}. Let phones and other computers connect (firewall)")
+    firewall = tools.active_firewall()
+    if firewall is None:
+        print("   No firewall is turned on, so there's nothing to open.")
+    elif tools.firewall_rule_exists():
+        print(f"   A firewall rule named \"{tools.FIREWALL_RULE}\" already exists.")
+    elif _yes(f"   Add a rule to {firewall} now? {tools.ADMIN_PROMPT}"):
+        if tools.add_firewall_rule(run.HTTP_PORT):
             print("   Added. Only devices on the local network can connect.")
         else:
-            print("   Not added. To do it later, run this in an admin PowerShell:")
-            print("   " + wintools.firewall_command(run.HTTP_PORT, run.HTTPS_PORT))
+            print(f"   Not added. To do it later, {tools.BY_HAND}")
+            print("   " + tools.firewall_command(run.HTTP_PORT))
 
     print(f"\n{next(step)}. Start automatically")
     if _yes("   Start In-Out in the background whenever you log in to this computer?"):
-        wintools.set_autostart(True)
+        tools.set_autostart(True)
         print("   On.")
     else:
-        wintools.set_autostart(False)
+        tools.set_autostart(False)
         print("   Off.")
 
-    print(f"\n{next(step)}. Desktop icon")
-    if _yes("   Put an In-Out icon on the desktop?"):
-        print("   Added." if wintools.create_desktop_shortcut() else "   Couldn't create it.")
+    print(f"\n{next(step)}. In-Out icon")
+    if _yes(f"   {tools.ICON_QUESTION}"):
+        print("   Added." if tools.create_desktop_shortcut() else "   Couldn't create it.")
 
     print(f"\n{next(step)}. Starting In-Out")
-    if run.is_running():
-        run.stop_background()  # restart so it uses the fresh certificate
     run.start_background()
-    print("\nSetup finished. Use the In-Out icon (or \"Start In-Out.bat\") to open it any time.")
+    print(f"\nSetup finished. Use the In-Out icon (or {run.START_SCRIPT}) to open it any time.")
 
 
 def main():
     parser = argparse.ArgumentParser(description="In-Out setup commands")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("setup", help="guided setup (used by Setup In-Out.bat)").set_defaults(func=cmd_setup)
+    sub.add_parser("setup", help="guided setup (used by Setup In-Out.bat and setup-inout.sh)").set_defaults(func=cmd_setup)
     sub.add_parser("init-db", help="create the database").set_defaults(func=cmd_init_db)
     sub.add_parser("migrate", help="upgrade the database").set_defaults(func=cmd_migrate)
     sub.add_parser("backup", help="back up the database").set_defaults(func=cmd_backup)
     sub.add_parser("update", help="update from GitHub (used by Update In-Out.bat)").set_defaults(func=cmd_update)
     sub.add_parser("create-admin", help="add an admin account").set_defaults(func=cmd_create_admin)
-    certs_cmd = sub.add_parser("make-certs", help="set up HTTPS for this computer's addresses")
-    certs_cmd.add_argument("--ip", action="append", default=[], metavar="ADDRESS",
-                           help="also include this address (repeatable), e.g. the server's reserved IP")
-    certs_cmd.set_defaults(func=cmd_make_certs)
     args = parser.parse_args()
     with create_app().app_context():
         try:
