@@ -204,7 +204,7 @@ def _yes(question, default=True):
 
 
 def cmd_setup(_args):
-    """The guided setup behind "Setup In-Out.bat" and setup-inout.sh. Safe to run again;
+    """The guided setup behind "Setup In-Out.bat" and linux/setup-inout.sh. Safe to run again;
     finished steps are skipped."""
     import run
 
@@ -230,7 +230,7 @@ def cmd_setup(_args):
     if sys.platform == "win32":
         import wintools as tools
     elif sys.platform.startswith("linux"):
-        import linuxtools as tools
+        from linux import linuxtools as tools
     else:
         print("\nThe remaining steps are for Windows and Linux. Start In-Out with: python run.py")
         return
@@ -268,7 +268,7 @@ def cmd_setup(_args):
 def main():
     parser = argparse.ArgumentParser(description="In-Out setup commands")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("setup", help="guided setup (used by Setup In-Out.bat and setup-inout.sh)").set_defaults(func=cmd_setup)
+    sub.add_parser("setup", help="guided setup (used by Setup In-Out.bat and linux/setup-inout.sh)").set_defaults(func=cmd_setup)
     sub.add_parser("init-db", help="create the database").set_defaults(func=cmd_init_db)
     sub.add_parser("migrate", help="upgrade the database").set_defaults(func=cmd_migrate)
     sub.add_parser("backup", help="back up the database").set_defaults(func=cmd_backup)

@@ -43,9 +43,9 @@ def client(app):
 
 @pytest.fixture
 def make_user(app, clock):
-    """make_user("Alice", pin="2468") -> user id. Admins also get username + password."""
+    """make_user("Alice", pin="2468", card="04A1B2C3") -> user id. Admins also get username + password."""
 
-    def make(name, pin=None, status="active", admin=None):
+    def make(name, pin=None, status="active", admin=None, card=None):
         with app.app_context():
             with transaction():
                 user_id = get_db().execute(
@@ -55,6 +55,8 @@ def make_user(app, clock):
                      int(bool(admin)), status, clock().isoformat())).lastrowid
                 if pin:
                     credentials.set_secret(user_id, "pin", pin, clock())
+                if card:
+                    credentials.set_secret(user_id, "nfc", card, clock())
         return user_id
 
     return make

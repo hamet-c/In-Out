@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sets up In-Out on this computer. Safe to run again; finished steps are skipped.
-cd "$(dirname "$0")" || exit 1
+cd "$(dirname "$0")/.." || exit 1
 
 failed() {
   echo

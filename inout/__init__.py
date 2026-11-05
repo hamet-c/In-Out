@@ -7,6 +7,7 @@ from flask import Flask, g, render_template
 
 from . import admin, auth, clock, filters
 from .auth import AttemptLimiter
+from .nfc import CardReader
 from .db import close_db
 
 
@@ -34,6 +35,8 @@ def create_app(config=None):
         app.config["SECRET_KEY"] = _secret_key(app.instance_path)
 
     app.extensions["inout_limiter"] = AttemptLimiter()
+    # Watches the USB card reader once run.py starts it; until then it just reports "not running".
+    app.extensions["inout_cards"] = CardReader()
     app.teardown_appcontext(close_db)
     app.before_request(auth.check_csrf)
     app.before_request(auth.load_people)

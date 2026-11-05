@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-import linuxtools
 import manage
 import run
 import wintools
 from inout.db import get_db
+from linux import linuxtools
 
 
 @pytest.fixture
@@ -167,6 +167,12 @@ def test_linux_icon_goes_in_the_app_menu_and_on_the_desktop(tmp_path):
         assert "[Desktop Action stop]" in text and "stop-inout.sh" in text
     icon = next(line for line in text.splitlines() if line.startswith("Icon="))
     assert Path(icon.removeprefix("Icon=")).is_file()
+
+
+def test_linux_launcher_paths_lead_to_real_files():
+    assert (linuxtools.ROOT / "run.py").is_file()
+    assert (linuxtools.HERE / "start-inout.sh").is_file()
+    assert (linuxtools.HERE / "stop-inout.sh").is_file()
 
 
 def test_linux_exec_lines_work_for_any_folder_name():

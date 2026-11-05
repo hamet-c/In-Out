@@ -1,5 +1,5 @@
-"""Credential -> user lookup. A PIN today; an NFC card ID later uses the same functions
-with kind="nfc", so the clock and sign-in code never need to know which one was used.
+"""Credential -> user lookup. A PIN uses kind="pin" and a card's ID kind="nfc", with the same
+functions, so the clock and sign-in code never need to know which one was used.
 """
 import hashlib
 import hmac
@@ -63,6 +63,10 @@ def set_secret(user_id, kind, secret, at):
         )
     except sqlite3.IntegrityError as e:
         raise CredentialTaken() from e
+
+
+def remove_secret(user_id, kind):
+    get_db().execute("DELETE FROM credentials WHERE user_id = ? AND kind = ?", (user_id, kind))
 
 
 def has_secret(user_id, kind):

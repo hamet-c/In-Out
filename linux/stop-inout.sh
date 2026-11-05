@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stops In-Out if it's running in the background.
-cd "$(dirname "$0")" || exit 1
+cd "$(dirname "$0")/.." || exit 1
 if [ ! -x .venv/bin/python ]; then
   echo "In-Out isn't set up yet."
   exit 1

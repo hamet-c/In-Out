@@ -1,10 +1,10 @@
-"""The employee page: PIN pad when nobody is signed in, otherwise today's clock."""
+"""The employee page: PIN pad (and card reader) when nobody is signed in, otherwise today's clock."""
 import sqlite3
 
 from flask import Blueprint, flash, g, redirect, render_template, request, url_for
 
 from . import days, filters, timesheet
-from .auth import employee_required
+from .auth import employee_required, station_reader
 from .db import get_db, transaction
 
 bp = Blueprint("clock", __name__)
@@ -14,8 +14,9 @@ NOTE_MAX = 500
 
 @bp.route("/")
 def dashboard():
+    card_reader = station_reader()
     if g.employee is None:
-        return render_template("pin.html")
+        return render_template("pin.html", card_reader=card_reader)
     at = timesheet.now()
     day = days.find_day(g.employee.id, at.date(), at)
     segments = day.segments if day else []
@@ -33,6 +34,7 @@ def dashboard():
         note=day.note if day else "",
         note_max=NOTE_MAX,
         stale_days=days.stale_dates(g.employee.id, at.date()),
+        card_reader=card_reader,
     )
 
 

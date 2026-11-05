@@ -1,0 +1,26 @@
+{#
+  Waits for a card to be tapped on the server's reader and links it to this person (see app.js).
+  Context:
+    user         id, display_name
+    card_reader  the server's CardReader: seq, ready, problem
+#}
+{% extends "base.html" %}
+{% from "_macros.html" import csrf with context %}
+{% block title %}Link a card{% endblock %}
+{% block content %}
+<section class="box narrow">
+  <h1>Link a card to {{ user.display_name }}</h1>
+  {% if card_reader.ready %}
+    <p>Tap {{ user.display_name }}'s card on the reader now. This page moves on by itself.</p>
+  {% else %}
+    <p class="message message-warning">{{ card_reader.problem }}</p>
+  {% endif %}
+  <p class="muted">A card that's already linked to someone else won't be taken from them.
+    Linking a new card replaces this person's old one.</p>
+  <form method="post" action="{{ url_for('admin.link_card', user_id=user.id) }}" hidden data-card-form>
+    {{ csrf() }}
+    <input type="hidden" name="after" value="{{ card_reader.seq }}">
+  </form>
+  <a class="button" href="{{ url_for('admin.users') }}">Cancel</a>
+</section>
+{% endblock %}

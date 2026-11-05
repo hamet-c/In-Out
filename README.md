@@ -1,6 +1,6 @@
 # In-Out
 
-A simple time clock for your local network. Employees enter a 4-digit PIN to clock in and out, and to submit their day with an optional note. Admins review hours, fix mistakes and export a CSV.
+A simple time clock for your local network. Employees enter a 4-digit PIN or tap their card to clock in and out, and to submit their day with an optional note. Admins review hours, fix mistakes and export a CSV.
 
 Everything runs on **one computer at your workplace**. Nothing is sent to the internet; the data lives in a single file on that computer.
 
@@ -82,40 +82,57 @@ python -m venv .venv
 
 ## On Linux
 
-In-Out runs on Linux too. The icon and auto-start need a desktop such as GNOME, KDE, Cinnamon or Xfce. Shell scripts take the place of the .bat files:
+In-Out runs on Linux too. The icon and auto-start need a desktop such as GNOME, KDE, Cinnamon or Xfce. Shell scripts in the `linux` folder take the place of the .bat files:
 
 | Windows | Linux |
 |---|---|
-| `Setup In-Out.bat` | `./setup-inout.sh` |
-| `Start In-Out.bat` | `./start-inout.sh` |
-| `Stop In-Out.bat` | `./stop-inout.sh` |
-| `Update In-Out.bat` | `./update-inout.sh` |
+| `Setup In-Out.bat` | `./linux/setup-inout.sh` |
+| `Start In-Out.bat` | `./linux/start-inout.sh` |
+| `Stop In-Out.bat` | `./linux/stop-inout.sh` |
+| `Update In-Out.bat` | `./linux/update-inout.sh` |
 
 1. **Install Python 3.10 or newer, its venv support, and git.** On Ubuntu, Debian or Mint: `sudo apt install python3 python3-venv git`. On Fedora: `sudo dnf install python3 git`.
 2. **Download In-Out with git**, for example into your home folder:
    ```
    git clone https://github.com/hamet-c/In-Out.git ~/In-Out
    ```
-3. **Run the setup** in a terminal: `cd ~/In-Out`, then `./setup-inout.sh`. It asks the same questions as on Windows:
+3. **Run the setup** in a terminal: `cd ~/In-Out`, then `./linux/setup-inout.sh`. It asks the same questions as on Windows:
    - **Firewall:** if ufw or firewalld is turned on, it adds rules that let only local-network addresses reach port 8000, and asks for your password (sudo). Ubuntu's firewall is off unless someone turned it on, and then there's nothing to do. To add the rules by hand with ufw, run `sudo ufw allow from 192.168.0.0/16 to any port 8000 proto tcp`, and the same with `10.0.0.0/8` and `172.16.0.0/12`.
    - **Auto-start** at login: adds `~/.config/autostart/In-Out.desktop`. Delete that file to turn it off.
    - **Icon:** puts In-Out in the app menu, and on the desktop if there is one. Right-click it for **Stop In-Out**. If the desktop calls the icon untrusted, right-click it and choose **Allow Launching**.
+
+**The card reader isn't set up on Linux yet**, so PINs are the only way to sign in there. To try it (untested):
+1. `sudo apt install pcscd libpcsclite-dev swig build-essential`, then `.venv/bin/pip install pyscard`.
+2. For an ACR122U, stop Linux's own NFC driver from taking the reader away from pcscd: `echo 'blacklist pn533_usb' | sudo tee /etc/modprobe.d/inout-nfc.conf`, then restart the computer.
+3. Restart In-Out. The **Users** page says whether it sees the reader.
 
 Everything else works as on Windows, with `/` in paths and `.venv/bin/` in place of `.venv\Scripts\`. The data is in `instance/inout.db` and the log is `instance/server.log`. For an offline install, download the `vendor` folder on a Linux computer, because some components differ between Windows and Linux.
 
 ## Day to day
 
-- **Employees** open the site, enter their PIN, and tap **Clock In** or **Clock Out**. After clocking out, they can **Submit day** with an optional note, for example "Forgot to clock in, started at 8:00". Submitting locks the day. The screen signs itself out after 30 seconds without a tap, so a shared station is safe to walk away from.
+- **Employees** open the site, enter their PIN (or tap their card at the server computer), and tap **Clock In** or **Clock Out**. After clocking out, they can **Submit day** with an optional note, for example "Forgot to clock in, started at 8:00". Submitting locks the day. The screen signs itself out after 30 seconds without a tap, so a shared station is safe to walk away from.
 - **New employees** tap "Request access", enter their name and choose a PIN. An admin approves them under **Users**.
 - **Admins** sign in from "Admin sign in" on the PIN screen:
   - **Timesheets:** hours by date range and person, with notes, flagged problems and **Export CSV**.
   - **Edit:** fix a day's times, add or delete entries, or reopen a submitted day. Every change is recorded in the day's change log.
-  - **Users:** approve or reject requests, add employees, disable people, and set or change PINs.
+  - **Users:** approve or reject requests, add employees, disable people, set or change PINs, and link cards.
+
+### Card reader
+Employees can tap a card instead of typing their PIN. PINs keep working too.
+
+1. **Plug the USB reader into the server computer.** An ACS ACR122U works, and so does any other "PC/SC" (smart card) USB reader. Windows sets it up by itself, with no driver to install. The **Users** page says "Card reader: … is ready" once In-Out sees it.
+2. **Use 13.56 MHz NFC cards or key fobs**, such as NTAG215 or MIFARE. The reader beeps when it sees one. 125 kHz cards, often sold as "RFID" or "EM4100", don't work with it. Bank cards and phones show a different ID on every tap, so they can't be linked.
+3. **Link each person's card:** on **Users**, press **Link card** next to their name, then tap their card on the reader. The page goes back to Users by itself. A card can belong to only one person, and linking a new card replaces their old one. **Remove card** unlinks a lost card.
+
+**The next person's tap takes over the screen.** If someone forgets to press **Done**, the next person doesn't have to wait for the 30-second sign-out. They tap their card, and the first person is signed out. An unknown card signs the first person out too. Tapping your own card again does nothing.
+
+**Only the server computer's own screen listens for cards,** when In-Out is opened with the In-Out icon (`http://127.0.0.1:8000`). Opened by its network address, such as `http://192.168.1.50:8000`, even on the server itself, the page shows only the PIN pad. Otherwise a laptop on the Wi-Fi sitting on the PIN screen would be signed in as whoever tapped their card at the station.
 
 ### Security notes
-- PINs are stored as keyed hashes, never as the digits themselves.
+- PINs and card IDs are stored as keyed hashes, never as the digits themselves.
 - Only one person is signed in per browser. Entering a PIN signs out any admin on that screen, so an admin who walks away can't leave the admin pages open to the next employee. Admin pages also sign out after 5 minutes without a tap or key press.
-- After 5 wrong PINs within 15 minutes, that device is locked out for 5 minutes. A correct PIN doesn't reset the count.
+- After 5 wrong PINs within 15 minutes, that device is locked out for 5 minutes. A correct PIN doesn't reset the count. Unknown cards don't count, and cards still work during a lockout. A card ID comes from the reader, not from the browser, so it can't be guessed by typing.
+- Anyone holding a coworker's card can clock them in, and a card's ID can be copied by someone who gets it close to their own reader. Treat cards like keys. Timesheets show who clocked in when.
 - Because employees choose their own PINs and PINs must be unique, "that PIN can't be used" reveals that someone else has it. These attempts count toward the lockout above. If that's a concern, have admins assign PINs instead.
 - In-Out uses plain HTTP, so PINs and admin passwords cross the network unencrypted. Someone else on the same Wi-Fi with the right tools could capture them. Browsers label the site "Not secure" for this reason.
 
@@ -132,6 +149,7 @@ All data is in `instance\inout.db`, including what's needed to check PINs. To ba
 .venv\Scripts\python -m pytest
 ```
 
-- **`inout/credentials.py`:** the credential-to-person lookup. PINs use `kind="pin"`, and a future NFC card reader uses `kind="nfc"` with the same functions and table (see `PLAN.md`).
+- **`inout/credentials.py`:** the credential-to-person lookup. PINs use `kind="pin"` and card IDs `kind="nfc"`, with the same functions and table.
+- **`inout/nfc.py`:** a background thread (started by `run.py`) that watches the USB reader through pyscard and keeps the latest tap. Pages on the server's own screen ask `POST /card` (or `/admin/users/<id>/card` when linking) twice a second for a newer tap, and the card ID never reaches a browser. Tests tap cards with `reader.tapped(uid)`.
 - **`inout/timesheet.py`:** the clock rules, as plain functions.
 - **Templates:** each one lists the context it expects in a comment at its top.

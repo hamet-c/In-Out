@@ -1,6 +1,6 @@
 """Who is at the screen.
 
-Employees sign in with their PIN (later also an NFC card) and are signed out after a short
+Employees sign in with their PIN or by tapping their card, and are signed out after a short
 idle time, since the same screen may be shared. Admins sign in separately with a username
 and password.
 
@@ -144,17 +144,25 @@ def admin_required(view):
     return wrapper
 
 
-# ---------------------------------------------------------------- employee: PIN
+# ---------------------------------------------------------------- employee: PIN or card
 
 def sign_in_with(kind, secret):
-    """Shared by the PIN pad now and an NFC reader later. Returns True on success."""
-    if _locked_out():
+    """Shared by the PIN pad and the card reader. Returns True on success.
+
+    Only PINs count toward the lockout. A card ID comes from the reader on the server, never
+    from the browser, so it can't be guessed by typing, and someone tapping a bank card by
+    mistake shouldn't lock the station.
+    """
+    guessable = kind == "pin"
+    if guessable and _locked_out():
         return False
     user_id = credentials.find_user_id(kind, secret)
     row = _load_user(user_id) if user_id else None
     if row is None:
-        _limiter().fail(request.remote_addr, timesheet.now())
-        flash("That PIN didn't match anyone. Try again." if kind == "pin" else "Card not recognized.", "error")
+        if guessable:
+            _limiter().fail(request.remote_addr, timesheet.now())
+        flash("That PIN didn't match anyone. Try again." if guessable
+              else "That card isn't linked to anyone. Ask an admin to link it.", "error")
         return False
     if row["status"] == "pending":
         flash("Your account is waiting for an admin to approve it.", "warning")
@@ -184,6 +192,42 @@ def _sign_out_admin():
 def pin():
     sign_in_with("pin", request.form.get("pin", "").strip())
     return redirect(url_for("clock.dashboard"))
+
+
+def card_reader():
+    return current_app.extensions["inout_cards"]
+
+
+def station_reader():
+    """The card reader, if this browser runs on the server computer itself, otherwise None.
+
+    The reader is plugged into the server, so only the screen next to it may use its taps.
+    Otherwise any laptop on the Wi-Fi showing the PIN pad would be signed in as whoever
+    tapped at the station.
+    """
+    return card_reader() if request.remote_addr in ("127.0.0.1", "::1") else None
+
+
+@bp.route("/card", methods=["POST"])
+def card():
+    """Asked twice a second by the PIN pad and the clock page (see app.js): 204 until a new
+    card is tapped, then sign in with it and tell the page where to go.
+
+    A tap means someone is at the station, so whoever forgot to press Done is signed out
+    first, even if the new card turns out not to be linked.
+    """
+    reader = station_reader()
+    if reader is None:
+        abort(403)
+    tap = reader.tap_after(request.form.get("after", 0, type=int))
+    if tap is None:
+        return "", 204
+    if g.employee and credentials.find_user_id("nfc", tap.uid) == g.employee.id:
+        # Their own card again, or the reader saw one tap twice. Leave their page alone.
+        return "", 204
+    _sign_out_employee()
+    sign_in_with("nfc", tap.uid)
+    return {"next": url_for("clock.dashboard")}
 
 
 @bp.route("/done", methods=["POST"])

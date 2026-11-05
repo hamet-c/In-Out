@@ -1,2 +1,4 @@
 flask>=3.0,<4
 cheroot>=10.0,<12
+# Reads the USB card reader. Windows only for now: there are no ready-made Linux builds.
+pyscard>=2.3,<3; sys_platform == "win32"

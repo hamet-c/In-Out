@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
 FIREWALL_RULE = "In-Out"
 PRIVATE_RANGES = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 UFW_CONF = Path("/etc/ufw/ufw.conf")
@@ -101,7 +102,7 @@ def set_autostart(enabled, startup_dir=None):
         "Type=Application\n"
         "Name=In-Out\n"
         "Comment=Starts In-Out at login. Delete this file to stop that.\n"
-        f"Exec={_exec(HERE / '.venv' / 'bin' / 'python', HERE / 'run.py', '--background')}\n"
+        f"Exec={_exec(ROOT / '.venv' / 'bin' / 'python', ROOT / 'run.py', '--background')}\n"
         "Terminal=false\n"
         "NoDisplay=true\n",
         encoding="utf-8",
@@ -119,7 +120,7 @@ def _launcher():
         "Name=In-Out\n"
         "Comment=Start In-Out and open the clock\n"
         f"Exec={_exec('bash', HERE / 'start-inout.sh')}\n"
-        f"Icon={HERE / 'inout' / 'static' / 'favicon.svg'}\n"
+        f"Icon={ROOT / 'inout' / 'static' / 'favicon.svg'}\n"
         # The start script's window closes by itself, or stays open to show what went wrong.
         "Terminal=true\n"
         "Categories=Office;\n"

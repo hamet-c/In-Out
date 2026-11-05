@@ -1,10 +1,16 @@
-{# Shown on / when no employee is signed in. Works with a keyboard, a phone keypad or the on-screen pad. #}
+{#
+  Shown on / when no employee is signed in. Works with a keyboard, a phone keypad or the on-screen pad.
+  Context:
+    card_reader  the server's CardReader (seq, ready) when this browser is on the server computer,
+                 else None. The page then signs in whoever taps a card (see app.js), and so
+                 does the clock page.
+#}
 {% extends "base.html" %}
 {% from "_macros.html" import csrf with context %}
 {% block title %}Enter your PIN{% endblock %}
 {% block content %}
 <section class="pin-box">
-  <h1>Enter your PIN</h1>
+  <h1>{{ 'Tap your card or enter your PIN' if card_reader and card_reader.ready else 'Enter your PIN' }}</h1>
   <form method="post" action="{{ url_for('auth.pin') }}" class="pin-form" data-pin-form data-once>
     {{ csrf() }}
     <input class="pin-input" type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}"
@@ -19,6 +25,12 @@
     </div>
     <button class="button button-primary button-big" type="submit">Go</button>
   </form>
+  {% if card_reader %}
+    <form method="post" action="{{ url_for('auth.card') }}" hidden data-card-form>
+      {{ csrf() }}
+      <input type="hidden" name="after" value="{{ card_reader.seq }}">
+    </form>
+  {% endif %}
   <p class="muted pin-links">
     <a href="{{ url_for('auth.register') }}">New employee? Request access</a>
     · <a href="{{ url_for('auth.admin_login') }}">Admin sign in</a>

@@ -1,4 +1,4 @@
-"""Admin pages: timesheets, CSV export, user approval and PINs, fixing a day."""
+"""Admin pages: timesheets, CSV export, user approval, PINs and cards, fixing a day."""
 import csv
 import io
 import sqlite3
@@ -8,7 +8,7 @@ from types import SimpleNamespace as NS
 from flask import Blueprint, Response, abort, flash, g, redirect, render_template, request, url_for
 
 from . import credentials, days, timesheet
-from .auth import admin_required
+from .auth import admin_required, card_reader
 from .db import get_db, transaction
 from .filters import clock
 
@@ -79,7 +79,8 @@ def export_csv():
 def users():
     rows = get_db().execute(
         "SELECT u.id, u.display_name, u.username, u.is_admin, u.status, u.created_at, "
-        "EXISTS (SELECT 1 FROM credentials c WHERE c.user_id = u.id AND c.kind = 'pin') AS has_pin "
+        "EXISTS (SELECT 1 FROM credentials c WHERE c.user_id = u.id AND c.kind = 'pin') AS has_pin, "
+        "EXISTS (SELECT 1 FROM credentials c WHERE c.user_id = u.id AND c.kind = 'nfc') AS has_card "
         "FROM users u ORDER BY u.status != 'active', lower(u.display_name)"
     ).fetchall()
     people = [NS(**{**dict(r), "created_at": datetime.fromisoformat(r["created_at"])}) for r in rows]
@@ -87,6 +88,7 @@ def users():
         "admin/users.html",
         pending=[p for p in people if p.status == "pending"],
         users=[p for p in people if p.status != "pending"],
+        card_reader=card_reader(),
     )
 
 
@@ -120,6 +122,7 @@ _ACTIONS = {
     "disable": "Disabled {name}.",
     "enable": "Re-enabled {name}.",
     "set_pin": "Set a new PIN for {name}.",
+    "remove_card": "Removed {name}'s card.",
 }
 
 
@@ -155,6 +158,8 @@ def user_update(user_id):
                     flash(problem, "error")
                     return redirect(url_for("admin.users"))
                 credentials.set_secret(user_id, "pin", pin, at)
+            elif action == "remove_card":
+                credentials.remove_secret(user_id, "nfc")
             else:
                 abort(400)
             days.log(g.admin.id, action, _ACTIONS[action].format(name=name), at)
@@ -163,6 +168,39 @@ def user_update(user_id):
         return redirect(url_for("admin.users"))
     flash(_ACTIONS[action].format(name=name), "success")
     return redirect(url_for("admin.users"))
+
+
+@bp.route("/users/<int:user_id>/card", methods=["GET", "POST"])
+@admin_required
+def link_card(user_id):
+    """GET shows "tap the card now". The page then asks with POST twice a second (see app.js):
+    204 until a card is tapped on the server's reader, then link it and say where to go."""
+    db = get_db()
+    user = db.execute("SELECT id, display_name FROM users WHERE id = ? AND status != 'pending'",
+                      (user_id,)).fetchone()
+    if user is None:
+        abort(404)
+    reader = card_reader()
+    if request.method == "GET":
+        return render_template("admin/link_card.html", user=user, card_reader=reader)
+
+    tap = reader.tap_after(request.form.get("after", 0, type=int))
+    if tap is None:
+        return "", 204
+    at = timesheet.now()
+    name = user["display_name"]
+    try:
+        with transaction(db):
+            credentials.set_secret(user_id, "nfc", tap.uid, at)
+            days.log(g.admin.id, "link_card", f"Linked a card to {name}", at)
+    except credentials.CredentialTaken:
+        owner = db.execute("SELECT display_name FROM users WHERE id = ?",
+                           (credentials.find_user_id("nfc", tap.uid),)).fetchone()
+        flash(f"That card is already linked to {owner['display_name'] if owner else 'someone else'}. "
+              "Remove it from them first, or use a different card.", "error")
+        return {"next": url_for("admin.link_card", user_id=user_id)}
+    flash(f"Linked the card to {name}. They can tap it to clock in now.", "success")
+    return {"next": url_for("admin.users")}
 
 
 # ---------------------------------------------------------------- one day

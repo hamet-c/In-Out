@@ -12,6 +12,8 @@
     note            the note the employee left when submitting ('' if none)
     note_max        max note length in characters
     stale_days      list of earlier dates that were never submitted
+    card_reader     the server's CardReader (seq) on the server computer's own screen, else None.
+                    Someone else tapping their card there takes over the screen (see app.js).
 #}
 {% extends "base.html" %}
 {% from "_macros.html" import csrf with context %}
@@ -79,6 +81,13 @@
 
   {% if state == 'submitted' and note %}
     <p class="note"><strong>Your note:</strong> {{ note }}</p>
+  {% endif %}
+
+  {% if card_reader %}
+    <form method="post" action="{{ url_for('auth.card') }}" hidden data-card-form>
+      {{ csrf() }}
+      <input type="hidden" name="after" value="{{ card_reader.seq }}">
+    </form>
   {% endif %}
 
   <h2>Today</h2>

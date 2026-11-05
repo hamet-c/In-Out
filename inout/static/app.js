@@ -61,6 +61,28 @@
     });
   }
 
+  // ---- Card reader: act as soon as a card is tapped --------------------------
+  // The reader is plugged into the server, which remembers the latest tap. This asks twice a
+  // second for a tap newer than the one the page was drawn after; the answer is 204 until
+  // there is one, then the server signs in (or links the card) and says where to go next.
+  // Used on the server's own screen by the PIN pad and the clock page (so the next person's
+  // tap replaces whoever forgot to press Done), and by an admin's "Link card" page.
+  var cardForm = document.querySelector("[data-card-form]");
+  if (cardForm) {
+    var askForCard = function () {
+      fetch(cardForm.action, { method: "POST", body: new FormData(cardForm), credentials: "same-origin" })
+        .then(function (r) {
+          if (r.status === 204) return setTimeout(askForCard, 500);
+          if (r.ok && !r.redirected) return r.json().then(function (d) { location.replace(d.next); });
+          // Signed out, or the page went stale; a fresh copy sorts it out.
+          location.reload();
+        })
+        // The server is restarting, most likely. Keep trying, a little slower.
+        .catch(function () { setTimeout(askForCard, 3000); });
+    };
+    askForCard();
+  }
+
   // ---- Shared screen: sign out after a stretch with no taps or typing --------
   // Used by the clock page (30 s) and by the admin header (a few minutes).
   var idleHost = document.querySelector("[data-idle-signout]");

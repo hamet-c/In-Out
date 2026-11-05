@@ -5,7 +5,7 @@
     python run.py --stop          stop the background server
     python run.py --open          open In-Out in this computer's browser
 
-"Start In-Out.bat" and "Stop In-Out.bat" use these (start-inout.sh and stop-inout.sh on Linux).
+"Start In-Out.bat" and "Stop In-Out.bat" use these (linux/start-inout.sh and linux/stop-inout.sh on Linux).
 
 In-Out runs on http://<this computer>:8000 (INOUT_PORT).
 INOUT_HOST=127.0.0.1 allows only this computer to connect.
@@ -35,8 +35,8 @@ HTTP_PORT = int(os.environ.get("INOUT_PORT", "8000"))
 LOG_MAX_BYTES = 1_000_000
 PRIVATE_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
 # What people run on this computer, for messages that tell them what to do.
-SETUP_SCRIPT = '"Setup In-Out.bat"' if sys.platform == "win32" else "./setup-inout.sh"
-START_SCRIPT = '"Start In-Out.bat"' if sys.platform == "win32" else "./start-inout.sh"
+SETUP_SCRIPT = '"Setup In-Out.bat"' if sys.platform == "win32" else "./linux/setup-inout.sh"
+START_SCRIPT = '"Start In-Out.bat"' if sys.platform == "win32" else "./linux/start-inout.sh"
 
 
 def serve_forever(server):
@@ -200,6 +200,7 @@ def serve(log=None, pidfile=None):
     if not Path(app.config["DATABASE"]).exists():
         raise SystemExit("No database yet. Run: python manage.py init-db")
     check_database(app)
+    app.extensions["inout_cards"].start()
     server = wsgi.Server((HOST, HTTP_PORT), app, numthreads=8)
     if pidfile:
         Path(pidfile).write_text(str(os.getpid()))

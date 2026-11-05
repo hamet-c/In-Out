@@ -1,20 +1,23 @@
 {#
   Context:
     pending   people waiting for approval: id, display_name, created_at
-    users     everyone else: id, display_name, username, is_admin, status ('active' | 'disabled'), has_pin
+    users     everyone else: id, display_name, username, is_admin, status ('active' | 'disabled'),
+              has_pin, has_card
+    card_reader  the server's CardReader: ready, name, problem
   Actions post to admin.user_update with an "action" field:
-    approve | reject | disable | enable | set_pin (+ pin)
+    approve | reject | disable | enable | set_pin (+ pin) | remove_card
+  Cards are linked on their own page, admin.link_card.
   Admin accounts are created with `python manage.py create-admin`.
 #}
 {% extends "base.html" %}
 {% from "_macros.html" import csrf with context %}
 {% block title %}Users{% endblock %}
 
-{% macro action(user, name, label, cls='button button-small') -%}
+{% macro action(user, name, label, cls='button button-small', confirm=None) -%}
   <form method="post" action="{{ url_for('admin.user_update', user_id=user.id) }}" class="inline" data-once>
     {{ csrf() }}
     <input type="hidden" name="action" value="{{ name }}">
-    <button class="{{ cls }}" type="submit">{{ label }}</button>
+    <button class="{{ cls }}" type="submit"{% if confirm %} data-confirm="{{ confirm }}"{% endif %}>{{ label }}</button>
   </form>
 {%- endmacro %}
 
@@ -49,10 +52,13 @@
 {% endif %}
 
 <h2>Everyone</h2>
+<p class="muted">
+  {% if card_reader.ready %}Card reader: {{ card_reader.name }} is ready.{% else %}{{ card_reader.problem }}{% endif %}
+</p>
 <div class="table-scroll">
   <table class="table">
     <thead>
-      <tr><th>Name</th><th>Role</th><th>PIN</th><th>Status</th><th></th></tr>
+      <tr><th>Name</th><th>Role</th><th>PIN</th><th>Card</th><th>Status</th><th></th></tr>
     </thead>
     <tbody>
       {% for u in users %}
@@ -60,6 +66,7 @@
           <td>{{ u.display_name }}{% if u.id == current_admin.id %} <span class="muted">(you)</span>{% endif %}</td>
           <td>{{ 'Admin (' ~ u.username ~ ')' if u.is_admin else 'Employee' }}</td>
           <td>{{ 'Set' if u.has_pin else '—' }}</td>
+          <td>{{ 'Linked' if u.has_card else '—' }}</td>
           <td>{% if u.status == 'disabled' %}<span class="status-bad">Disabled</span>{% else %}Active{% endif %}</td>
           <td class="actions">
             {% if u.id != current_admin.id %}
@@ -74,6 +81,10 @@
                 <button class="button button-small button-primary" type="submit">Save</button>
               </form>
             </details>
+            <a class="button button-small" href="{{ url_for('admin.link_card', user_id=u.id) }}">
+              {{- 'Replace card' if u.has_card else 'Link card' -}}
+            </a>
+            {% if u.has_card %}{{ action(u, 'remove_card', 'Remove card', confirm='Click again to remove') }}{% endif %}
           </td>
         </tr>
       {% endfor %}
