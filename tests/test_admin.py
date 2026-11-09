@@ -125,3 +125,90 @@ def test_reopen_lets_the_employee_clock_in_again(admin_client, app, make_user, c
     assert query("SELECT submitted_at FROM workdays")[0]["submitted_at"] is None
     assert "Clock In" in c.get("/").get_data(as_text=True)
     assert "Reopened the day" in admin_client.get(f"/admin/day/{day_id}").get_data(as_text=True)
+
+
+# ---------------------------------------------------------------- more than one admin
+
+def _admin_form(username="sam", password="sam-password", confirm=None, **extra):
+    return {"username": username, "password": password,
+            "confirm": password if confirm is None else confirm, **extra}
+
+
+def test_admin_adds_another_admin_who_can_sign_in(admin_client, client, query):
+    r = admin_client.post("/admin/users/new-admin", data=_admin_form("Sam ", display_name="Sam Ortiz"),
+                          follow_redirects=True)
+    assert "Added Sam Ortiz as an admin. They sign in with the username sam." in r.get_data(as_text=True)
+    assert query("SELECT is_admin, status FROM users WHERE username = 'sam'") == [{"is_admin": 1, "status": "active"}]
+    assert query("SELECT COUNT(*) AS n FROM credentials")[0]["n"] == 0  # no PIN asked for, none set
+
+    sam = client.application.test_client()
+    assert sign_in_admin(sam, "sam", "sam-password").headers["Location"].endswith("/admin/")
+    assert "Added Sam Ortiz as an admin (sam)" in [r["detail"] for r in query("SELECT detail FROM audit_log")]
+
+
+def test_a_new_admin_can_also_get_a_pin(admin_client, client, query):
+    admin_client.post("/admin/users/new-admin", data=_admin_form(display_name="Sam", pin="1357"))
+    assert "Hi, Sam" in sign_in_pin(client.application.test_client(), "1357").get_data(as_text=True)
+
+
+@pytest.mark.parametrize("form, problem", [
+    (_admin_form("boss", display_name="Sam"), "The username boss is taken"),
+    (_admin_form("sam o", display_name="Sam"), "no spaces"),
+    (_admin_form(password="short", display_name="Sam"), "at least 8 characters"),
+    (_admin_form(confirm="sam-passw0rd", display_name="Sam"), "passwords didn"),  # the page escapes the '
+    (_admin_form(display_name="  "), "Please enter a name"),
+    (_admin_form(display_name="Sam", pin="12"), "4 digits"),
+])
+def test_adding_an_admin_is_checked(admin_client, query, form, problem):
+    r = admin_client.post("/admin/users/new-admin", data=form, follow_redirects=True)
+    assert problem in r.get_data(as_text=True)
+    assert query("SELECT display_name FROM users") == [{"display_name": "Dana"}]
+
+
+def test_making_an_employee_an_admin_keeps_their_pin(admin_client, client, make_user, query):
+    alice = make_user("Alice", pin="2468")
+    r = admin_client.post(f"/admin/users/{alice}", data=_admin_form("alice", action="make_admin"),
+                          follow_redirects=True)
+    assert "Made Alice an admin. They sign in with the username alice." in r.get_data(as_text=True)
+    assert sign_in_admin(client.application.test_client(), "alice", "sam-password").status_code == 302
+    assert query("SELECT is_admin FROM users WHERE id = ?", alice) == [{"is_admin": 1}]
+    assert "Hi, Alice" in sign_in_pin(client.application.test_client(), "2468").get_data(as_text=True)
+
+
+def test_make_admin_refuses_a_taken_username(admin_client, make_user, query):
+    alice = make_user("Alice", pin="2468")
+    r = admin_client.post(f"/admin/users/{alice}", data=_admin_form("boss", action="make_admin"),
+                          follow_redirects=True)
+    assert "The username boss is taken" in r.get_data(as_text=True)
+    assert query("SELECT is_admin, username FROM users WHERE id = ?", alice) == [{"is_admin": 0, "username": None}]
+
+
+def test_removing_an_admin_keeps_them_as_an_employee_and_signs_them_out(admin_client, app, make_user, query):
+    sam = make_user("Sam", pin="1357", admin="sam")
+    sam_screen = app.test_client()
+    sign_in_admin(sam_screen, "sam")
+    assert sam_screen.get("/admin/users").status_code == 200
+
+    r = admin_client.post(f"/admin/users/{sam}", data={"action": "remove_admin"}, follow_redirects=True)
+    assert "Sam is no longer an admin." in r.get_data(as_text=True)
+    assert query("SELECT is_admin, username, password_hash, status FROM users WHERE id = ?", sam) == [
+        {"is_admin": 0, "username": None, "password_hash": None, "status": "active"}]
+    assert sam_screen.get("/admin/users").status_code == 302  # their open admin page is closed
+    assert sign_in_admin(app.test_client(), "sam").status_code == 200  # the sign-in page again, not in
+    assert "Hi, Sam" in sign_in_pin(app.test_client(), "1357").get_data(as_text=True)
+
+
+def test_an_admin_cannot_remove_their_own_admin_access(admin_client, query):
+    dana = query("SELECT id FROM users WHERE username = 'boss'")[0]["id"]
+    r = admin_client.post(f"/admin/users/{dana}", data={"action": "remove_admin"}, follow_redirects=True)
+    assert "remove your own admin access" in r.get_data(as_text=True)
+    assert query("SELECT is_admin FROM users WHERE id = ?", dana) == [{"is_admin": 1}]
+
+
+def test_users_page_offers_the_admin_buttons(admin_client, make_user):
+    make_user("Alice", pin="2468")
+    make_user("Sam", admin="sam")
+    page = admin_client.get("/admin/users").get_data(as_text=True)
+    assert page.count('value="make_admin"') == 1  # Alice; not Sam or Dana, who are admins already
+    assert page.count('value="remove_admin"') == 1  # Sam; never yourself
+    assert "Add an admin" in page

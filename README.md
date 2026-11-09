@@ -19,7 +19,9 @@ These steps are for Windows. For a Linux computer, see **On Linux** below.
    - installs In-Out's components,
    - creates the database and your admin account (name, username, password, and an optional clock-in PIN),
    - adds the firewall rule so phones can connect (Windows asks for admin permission),
-   - turns on auto-start at login and puts an **In-Out** icon on the desktop,
+   - makes In-Out start when the computer starts, before anyone signs in (Windows asks for admin permission again). If you skip that, it offers to start In-Out when you log in instead,
+   - walks you through turning on the Windows kiosk for the clock station (see **Clock station (Windows kiosk)** below),
+   - puts an **In-Out** icon on the desktop,
    - starts In-Out.
 
 You can run the setup again at any time. Finished steps are skipped.
@@ -55,12 +57,29 @@ Your data (`instance` folder: database and settings) is never touched by updates
 - **In-Out icon on the desktop** (or `Start In-Out.bat`): starts In-Out in the background if it isn't running yet, and opens the clock in the browser. There's no window to close by accident.
 - **`Stop In-Out.bat`**: stops it.
 - **`Update In-Out.bat`**: installs the newest version from GitHub (see **Updating**).
-- **Auto-start:** if you turned it on, In-Out starts by itself whenever you log in to this computer. To turn it off, run the setup again and answer "n", or delete `In-Out.cmd` from the Startup folder (Win+R, then `shell:startup`).
+- **Auto-start:** if you said yes to starting with the computer, Windows starts In-Out when the computer starts, before anyone signs in. It runs as your Windows account, with no window, and keeps running when you sign out. It's a task named "In-Out" in Task Scheduler. If you chose starting at login instead, In-Out starts when you log in and stops when you sign out. To turn either off, run the setup again and answer "n".
 - **Log:** messages go to `instance\server.log`.
 
 When it starts, it shows the address to use, such as `http://192.168.1.50:8000`.
 
-Auto-start runs when this computer's user logs in, not before. If the server computer reboots, someone needs to log in, or set up automatic sign-in for that account.
+### Clock station (Windows kiosk)
+On the computer people clock in at, Windows' own kiosk shows only the clock, full screen, with no taskbar or desktop. If Edge is closed, Windows reopens it. The kiosk needs **Windows Pro, Enterprise or Education** (Home has no kiosk).
+
+The kiosk signs in to a separate kiosk account that can only run Edge, so it can't start In-Out itself. That's why In-Out starts with the computer instead: by the time the kiosk opens Edge, In-Out is already running.
+
+1. Run the setup and answer yes to starting In-Out with the computer.
+2. At the **Windows kiosk** step, let it open Settings (**Accounts > Other users**), then:
+   1. Next to **Set up a kiosk**, select **Get started**.
+   2. Name the kiosk account, for example "In-Out clock".
+   3. Choose **Microsoft Edge**, and the full-screen option (digital sign or interactive display), not the public browser.
+   4. For the address, enter exactly `http://127.0.0.1:8000/`. That's this computer. The card reader only works there, not at its network address.
+3. Restart. The kiosk account signs in by itself and opens the clock.
+
+**To get back to your own account**, for example to run **Update In-Out.bat**, press Ctrl+Alt+Del, choose **Sign out**, and sign in as yourself. In-Out keeps running, and Update and Stop work as usual. Signing out hands the screen back to the kiosk.
+
+**After switching, check the card reader**: the **Users** page should say "Card reader: … is ready". In-Out now runs without anyone signed in, and that hasn't been tried with the reader yet. If it says no reader is plugged in while one is, tell the developer. PINs work either way.
+
+To stop using the kiosk, remove it in the same Settings page.
 
 ### So other devices can reach it
 1. **Firewall:** the setup adds a rule named "In-Out" that allows only local-network addresses. To add it by hand, run this in an admin PowerShell:
@@ -116,6 +135,7 @@ Everything else works as on Windows, with `/` in paths and `.venv/bin/` in place
   - **Timesheets:** hours by date range and person, with notes, flagged problems and **Export CSV**.
   - **Edit:** fix a day's times, add or delete entries, or reopen a submitted day. Every change is recorded in the day's change log.
   - **Users:** approve or reject requests, add employees, disable people, set or change PINs, and link cards.
+  - **More admins:** on **Users**, **Add an admin** creates a new one with their own username and password. A clock-in PIN is optional. **Make admin** on someone's row gives an employee admin access and keeps their PIN, card and hours. **Remove admin** takes it away again, and they stay on as an employee. You can't remove your own admin access or disable yourself, so there's always at least one admin. These changes are recorded in the database's `audit_log` with who made them, though no page shows them yet.
 
 ### Card reader
 Employees can tap a card instead of typing their PIN. PINs keep working too.

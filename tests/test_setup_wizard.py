@@ -30,6 +30,13 @@ def windows_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(wintools, "set_autostart", lambda on, startup_dir=None: calls.append(("autostart", on)))
     monkeypatch.setattr(wintools, "create_desktop_shortcut", lambda: calls.append("shortcut") or True)
     monkeypatch.setattr(run, "start_background", lambda: calls.append("start") or 0)
+    # The startup task, kept in a variable instead of Task Scheduler.
+    task = {"exists": False}
+    monkeypatch.setattr(wintools, "boot_task_exists", lambda: task["exists"])
+    monkeypatch.setattr(wintools, "add_boot_task", lambda: calls.append("add task") or task.update(exists=True) or True)
+    monkeypatch.setattr(wintools, "remove_boot_task", lambda: calls.append("remove task") or task.update(exists=False) or True)
+    monkeypatch.setattr(wintools, "kiosk_supported", lambda: True)
+    monkeypatch.setattr(wintools, "open_kiosk_settings", lambda: calls.append("kiosk settings"))
     return calls
 
 
@@ -54,30 +61,68 @@ def answers(monkeypatch, typed, secrets):
 
 def test_first_run_sets_everything_up(fresh_app, windows_calls, monkeypatch, capsys):
     answers(monkeypatch,
-            typed=["Dana Whitfield", "Boss", "", "", ""],  # name, username, then Enter = yes x3
+            typed=["Dana Whitfield", "Boss", "", "", "", ""],  # name, username, then Enter = yes x4
             secrets=["correct-horse", "correct-horse", "9157"])
     with fresh_app.app_context():
         manage.cmd_setup(None)
         admin = get_db().execute("SELECT display_name, username, is_admin FROM users").fetchone()
     assert tuple(admin) == ("Dana Whitfield", "boss", 1)
-    assert windows_calls == [("firewall", run.HTTP_PORT), ("autostart", True), "shortcut", "start"]
+    # Starts with the computer, so the old start-at-login file goes; then the kiosk steps.
+    assert windows_calls == [("firewall", run.HTTP_PORT), "add task", ("autostart", False),
+                             "kiosk settings", "shortcut", "start"]
     out = capsys.readouterr().out
     assert "Created." in out and "Setup finished" in out
+    assert f"http://127.0.0.1:{run.HTTP_PORT}/" in out and "Set up a kiosk" in out
 
 
 def test_running_again_skips_finished_steps_and_respects_no(fresh_app, windows_calls, monkeypatch, capsys):
-    answers(monkeypatch, typed=["Dana", "boss", "", "", ""], secrets=["correct-horse", "correct-horse", ""])
+    answers(monkeypatch, typed=["Dana", "boss", "", "", "", ""], secrets=["correct-horse", "correct-horse", ""])
     with fresh_app.app_context():
         manage.cmd_setup(None)
     windows_calls.clear()
     capsys.readouterr()
 
-    answers(monkeypatch, typed=["n", "n", "n"], secrets=[])
+    # firewall, start with the computer, start at login instead, icon
+    answers(monkeypatch, typed=["n", "n", "n", "n"], secrets=[])
     with fresh_app.app_context():
         manage.cmd_setup(None)
     out = capsys.readouterr().out
     assert "Already set up." in out and "An admin already exists" in out
-    assert windows_calls == [("autostart", False), "start"]
+    assert windows_calls == ["remove task", ("autostart", False), "start"]
+    assert "The kiosk needs In-Out to start with the computer" in out
+
+
+def test_keeping_the_startup_task_asks_for_no_admin_permission(fresh_app, windows_calls, monkeypatch, capsys):
+    answers(monkeypatch, typed=["Dana", "boss", "", "", "", ""], secrets=["correct-horse", "correct-horse", ""])
+    with fresh_app.app_context():
+        manage.cmd_setup(None)
+    windows_calls.clear()
+    capsys.readouterr()
+
+    answers(monkeypatch, typed=["n", "", "n", "n"], secrets=[])  # firewall, keep task, settings, icon
+    with fresh_app.app_context():
+        manage.cmd_setup(None)
+    assert windows_calls == [("autostart", False), "start"]  # no "add task" again
+    assert wintools.ADMIN_PROMPT not in capsys.readouterr().out.split("Start automatically")[1].split("Windows kiosk")[0]
+
+
+def test_without_the_startup_task_it_offers_start_at_login(fresh_app, windows_calls, monkeypatch, capsys):
+    monkeypatch.setattr(wintools, "add_boot_task", lambda: windows_calls.append("add task") or False)  # refused
+    answers(monkeypatch, typed=["Dana", "boss", "", "", "", ""], secrets=["correct-horse", "correct-horse", ""])
+    with fresh_app.app_context():
+        manage.cmd_setup(None)
+    assert windows_calls == [("firewall", run.HTTP_PORT), "add task", ("autostart", True), "shortcut", "start"]
+    out = capsys.readouterr().out
+    assert "Couldn't add it." in out and "The kiosk needs In-Out to start with the computer" in out
+
+
+def test_windows_home_is_told_it_has_no_kiosk(fresh_app, windows_calls, monkeypatch, capsys):
+    monkeypatch.setattr(wintools, "kiosk_supported", lambda: False)
+    answers(monkeypatch, typed=["Dana", "boss", "", "", ""], secrets=["correct-horse", "correct-horse", ""])
+    with fresh_app.app_context():
+        manage.cmd_setup(None)
+    assert "kiosk settings" not in windows_calls
+    assert "This is Windows Home, which has no kiosk" in capsys.readouterr().out
 
 
 def test_autostart_file_points_at_this_install(tmp_path):
@@ -87,6 +132,25 @@ def test_autostart_file_points_at_this_install(tmp_path):
     assert wintools.autostart_enabled(tmp_path)
     wintools.set_autostart(False, startup_dir=tmp_path)
     assert not wintools.autostart_enabled(tmp_path)
+
+
+def test_startup_task_runs_in_out_as_the_person_not_system():
+    script = wintools.boot_task_script(r"STATION\dana")
+    assert "$user = 'STATION\\dana'" in script
+    assert "-LogonType S4U" in script and "-RunLevel Limited" in script and "SYSTEM" not in script
+    assert "-AtStartup" in script
+    assert "-ExecutionTimeLimit ([TimeSpan]::Zero)" in script  # otherwise stopped after 3 days
+    assert str(wintools.HERE / ".venv" / "Scripts" / "pythonw.exe") in script
+    assert f'"{wintools.HERE / "run.py"}" --service' in script
+    # Admins, SYSTEM and that person (to start and remove it without the admin prompt), nobody else.
+    assert 'SecurityDescriptor = "D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;$sid)"' in script
+
+
+def test_home_editions_have_no_kiosk():
+    assert not wintools.kiosk_supported("Core")
+    assert not wintools.kiosk_supported("CoreSingleLanguage")
+    for edition in ("Professional", "Enterprise", "Education", "IoTEnterprise"):
+        assert wintools.kiosk_supported(edition)
 
 
 def test_firewall_rule_only_admits_local_network_addresses():

@@ -203,6 +203,49 @@ def _yes(question, default=True):
             return answer.startswith("y")
 
 
+def _setup_boot_task(tools):
+    """Windows: start In-Out when the computer starts, before anyone signs in. The Windows kiosk
+    needs this, since its account runs only Edge. True if it's on."""
+    already = tools.boot_task_exists()
+    question = "   Start In-Out when this computer starts, before anyone signs in? The Windows kiosk needs this."
+    if not _yes(question + ("" if already else f" {tools.ADMIN_PROMPT}")):
+        if already and not tools.remove_boot_task():
+            print(f'   Couldn\'t turn it off. Delete the "{tools.TASK_NAME}" task in Task Scheduler.')
+        return False
+    if already or tools.add_boot_task():
+        tools.set_autostart(False)  # starting at login too would only find it running already
+        print("   On.")
+        return True
+    print("   Couldn't add it.")
+    return False
+
+
+KIOSK_STEPS = """\
+   Windows runs the kiosk itself. In Settings > Accounts > Other users:
+     1. Next to "Set up a kiosk", select Get started.
+     2. Name the kiosk account, for example "In-Out clock", and select Next.
+     3. Choose Microsoft Edge.
+     4. Choose the full-screen option (digital sign or interactive display), not the public browser.
+     5. For the address, enter exactly: http://127.0.0.1:{port}/
+        (127.0.0.1 is this computer. The card reader works only there, not at its network address.)
+     6. Close Settings and restart. The kiosk account signs in by itself and opens the clock.
+   To get back to your own account: press Ctrl+Alt+Del, choose Sign out, and sign in as yourself.
+   In-Out keeps running, so Update and Stop work as usual. Signing out returns the screen to the kiosk."""
+
+
+def _setup_kiosk(tools, with_computer, port):
+    """Windows: explain the kiosk setup in Settings. Windows has no simple command for it."""
+    if not tools.kiosk_supported():
+        print("   This is Windows Home, which has no kiosk. It needs Windows Pro, Enterprise or Education.")
+    elif not with_computer:
+        print("   The kiosk needs In-Out to start with the computer (the step above). Run the setup\n"
+              "   again and answer \"y\" there to use it.")
+    else:
+        print(KIOSK_STEPS.format(port=port))
+        if _yes("   Open those Settings now?"):
+            tools.open_kiosk_settings()
+
+
 def cmd_setup(_args):
     """The guided setup behind "Setup In-Out.bat" and linux/setup-inout.sh. Safe to run again;
     finished steps are skipped."""
@@ -222,7 +265,7 @@ def cmd_setup(_args):
 
     print(f"\n{next(step)}. Admin account")
     if get_db().execute("SELECT 1 FROM users WHERE is_admin = 1").fetchone():
-        print("   An admin already exists. (Add another with: manage.py create-admin)")
+        print("   An admin already exists. Add more admins on the Users page.")
     else:
         print("   This is who signs in to the admin pages.")
         cmd_create_admin(None)
@@ -249,12 +292,18 @@ def cmd_setup(_args):
             print("   " + tools.firewall_command(run.HTTP_PORT))
 
     print(f"\n{next(step)}. Start automatically")
-    if _yes("   Start In-Out in the background whenever you log in to this computer?"):
-        tools.set_autostart(True)
-        print("   On.")
-    else:
-        tools.set_autostart(False)
-        print("   Off.")
+    with_computer = sys.platform == "win32" and _setup_boot_task(tools)
+    if not with_computer:
+        if _yes("   Start In-Out in the background whenever you log in to this computer?"):
+            tools.set_autostart(True)
+            print("   On.")
+        else:
+            tools.set_autostart(False)
+            print("   Off.")
+
+    if sys.platform == "win32":
+        print(f"\n{next(step)}. Windows kiosk (the clock station)")
+        _setup_kiosk(tools, with_computer, run.HTTP_PORT)
 
     print(f"\n{next(step)}. In-Out icon")
     if _yes(f"   {tools.ICON_QUESTION}"):

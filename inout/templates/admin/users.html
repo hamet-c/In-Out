@@ -6,8 +6,9 @@
     card_reader  the server's CardReader: ready, name, problem
   Actions post to admin.user_update with an "action" field:
     approve | reject | disable | enable | set_pin (+ pin) | remove_card
-  Cards are linked on their own page, admin.link_card.
-  Admin accounts are created with `python manage.py create-admin`.
+    make_admin (+ username, password, confirm) | remove_admin
+  Cards are linked on their own page, admin.link_card. New admins come from admin.create_admin
+  (or `python manage.py create-admin` on the server).
 #}
 {% extends "base.html" %}
 {% from "_macros.html" import csrf with context %}
@@ -21,10 +22,23 @@
   </form>
 {%- endmacro %}
 
-{% macro pin_field(label='PIN') -%}
+{% macro pin_field(label='PIN', required=True) -%}
   <label>{{ label }}
     <input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4"
-           autocomplete="off" title="4 digits" required>
+           autocomplete="off" title="4 digits" {{ 'required' if required }}>
+  </label>
+{%- endmacro %}
+
+{% macro admin_fields() -%}
+  <label>Username (for the admin sign-in)
+    <input name="username" maxlength="40" pattern="\S+" title="No spaces" autocomplete="off"
+           autocapitalize="none" spellcheck="false" required>
+  </label>
+  <label>Password, 8+ characters
+    <input type="password" name="password" minlength="8" autocomplete="new-password" required>
+  </label>
+  <label>Password again
+    <input type="password" name="confirm" minlength="8" autocomplete="new-password" required>
   </label>
 {%- endmacro %}
 
@@ -85,6 +99,20 @@
               {{- 'Replace card' if u.has_card else 'Link card' -}}
             </a>
             {% if u.has_card %}{{ action(u, 'remove_card', 'Remove card', confirm='Click again to remove') }}{% endif %}
+            {% if u.is_admin and u.id != current_admin.id %}
+              {{ action(u, 'remove_admin', 'Remove admin', confirm='Click again to remove admin') }}
+            {% elif not u.is_admin and u.status == 'active' %}
+              <details class="inline">
+                <summary class="button button-small">Make admin</summary>
+                <form method="post" action="{{ url_for('admin.user_update', user_id=u.id) }}" class="popover" data-once>
+                  {{ csrf() }}
+                  <input type="hidden" name="action" value="make_admin">
+                  <p class="muted">{{ u.display_name }} will sign in to the admin pages with these.</p>
+                  {{ admin_fields() }}
+                  <button class="button button-small button-primary" type="submit">Make admin</button>
+                </form>
+              </details>
+            {% endif %}
           </td>
         </tr>
       {% endfor %}
@@ -98,5 +126,16 @@
   <label>Full name <input name="display_name" maxlength="80" required></label>
   {{ pin_field('PIN (4 digits, tell them privately)') }}
   <button class="button button-primary" type="submit">Add employee</button>
+</form>
+
+<h2>Add an admin</h2>
+<p class="muted">Admins sign in with a username and password and can use every admin page.
+  To make someone already on the list an admin, use <strong>Make admin</strong> on their row.</p>
+<form method="post" action="{{ url_for('admin.create_admin') }}" class="box form narrow" data-once>
+  {{ csrf() }}
+  <label>Full name <input name="display_name" maxlength="80" required></label>
+  {{ admin_fields() }}
+  {{ pin_field('Clock-in PIN, if they clock in too (optional)', required=False) }}
+  <button class="button button-primary" type="submit">Add admin</button>
 </form>
 {% endblock %}

@@ -1,9 +1,9 @@
-"""Windows integration for "Setup In-Out.bat": open the firewall, start at login and
-put an icon on the desktop.
+"""Windows integration for "Setup In-Out.bat": open the firewall, start with the computer
+(for the Windows kiosk) or at login, and put an icon on the desktop.
 
-Every change can be undone. The firewall rule shows up under its "In-Out" name in
-Windows, the auto-start entry is one file in the Startup folder, and the icon is a
-normal shortcut.
+Every change can be undone. The firewall rule and the scheduled task show up under their
+"In-Out" names in Windows, the start-at-login entry is one file in the Startup folder, and
+the icon is a normal shortcut.
 """
 import base64
 import os
@@ -12,6 +12,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FIREWALL_RULE = "In-Out"
+TASK_NAME = "In-Out"  # the startup task, see "start with the computer" below
 PRIVATE_RANGES = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
 # Wording for the setup wizard (linuxtools has its own).
@@ -104,3 +105,90 @@ def create_desktop_shortcut(folder=None):
         "Test-Path (Join-Path $desktop 'In-Out.lnk')"
     )
     return "True" in _powershell(script).stdout
+
+
+# ---------------------------------------------------------------- start with the computer (for the Windows kiosk)
+#
+# Windows' kiosk signs in a kiosk account that runs only Edge, so nothing in that account can
+# start In-Out. Instead a scheduled task starts it when the computer starts, before anyone
+# signs in, and the kiosk's Edge opens http://127.0.0.1:8000/.
+
+KIOSK_SETTINGS = "ms-settings:otherusers"
+
+
+def current_user():
+    """DOMAIN\\name of whoever runs the setup."""
+    return f"{os.environ['USERDOMAIN']}\\{os.environ['USERNAME']}"
+
+
+def boot_task_script(user, name=TASK_NAME):
+    """PowerShell that registers the task. It runs In-Out as user, never as SYSTEM: anyone can
+    edit the In-Out folder's files, so running them as SYSTEM would let them take over the computer."""
+    pythonw = HERE / ".venv" / "Scripts" / "pythonw.exe"
+    arguments = f'"{HERE / "run.py"}" --service'
+    return (
+        f"$user = {_ps_quote(user)};"
+        "$sid = (New-Object System.Security.Principal.NTAccount($user))"
+        ".Translate([System.Security.Principal.SecurityIdentifier]).Value;"
+        f"$action = New-ScheduledTaskAction -Execute {_ps_quote(pythonw)} "
+        f"-Argument {_ps_quote(arguments)} -WorkingDirectory {_ps_quote(HERE)};"
+        "$trigger = New-ScheduledTaskTrigger -AtStartup;"
+        # S4U: runs whether or not they're signed in, without storing their Windows password.
+        "$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel Limited;"
+        # No time limit (by default tasks are stopped after 3 days), and keep going on battery.
+        "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries "
+        "-DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -Priority 5;"
+        "$task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings "
+        "-Description 'Starts In-Out when the computer starts, for the Windows kiosk. Made by Setup In-Out.bat.';"
+        # Let them start and remove it without the admin prompt (Start/Update In-Out.bat, setup).
+        "$task.RegistrationInfo.SecurityDescriptor = \"D:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;$sid)\";"
+        f"Register-ScheduledTask -TaskName {_ps_quote(name)} -InputObject $task -Force | Out-Null"
+    )
+
+
+def boot_task_exists(name=TASK_NAME):
+    return subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True).returncode == 0
+
+
+def add_boot_task(name=TASK_NAME):
+    """Only admins may add tasks that run at startup, so Windows asks for admin permission."""
+    _powershell(boot_task_script(current_user(), name), elevated=True)
+    return boot_task_exists(name)
+
+
+def remove_boot_task(name=TASK_NAME):
+    subprocess.run(["schtasks", "/Delete", "/TN", name, "/F"], capture_output=True)
+    if boot_task_exists(name):  # someone else's task, say: ask for admin permission
+        _powershell(f"Unregister-ScheduledTask -TaskName {_ps_quote(name)} -Confirm:$false", elevated=True)
+    return not boot_task_exists(name)
+
+
+def run_boot_task(name=TASK_NAME):
+    """Start In-Out through the task, so it keeps running after this person signs out."""
+    return subprocess.run(["schtasks", "/Run", "/TN", name], capture_output=True).returncode == 0
+
+
+def end_boot_task(name=TASK_NAME):
+    """Stop the In-Out the task started. Windows won't let its owner end that process directly
+    (taskkill says "access denied"), but Task Scheduler ends it for anyone the task allows."""
+    return subprocess.run(["schtasks", "/End", "/TN", name], capture_output=True).returncode == 0
+
+
+def windows_edition():
+    import winreg  # Windows only, and this module is also imported by the tests elsewhere
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as key:
+            return winreg.QueryValueEx(key, "EditionID")[0]
+    except OSError:
+        return ""
+
+
+def kiosk_supported(edition=None):
+    """Windows' kiosk needs Pro, Enterprise or Education. Home editions are called "Core"."""
+    edition = windows_edition() if edition is None else edition
+    return not edition.startswith("Core")
+
+
+def open_kiosk_settings():
+    os.startfile(KIOSK_SETTINGS)

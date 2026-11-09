@@ -6,6 +6,7 @@
     python run.py --open          open In-Out in this computer's browser
 
 "Start In-Out.bat" and "Stop In-Out.bat" use these (linux/start-inout.sh and linux/stop-inout.sh on Linux).
+On a Windows kiosk computer, --background starts In-Out through its startup task (see wintools.py).
 
 In-Out runs on http://<this computer>:8000 (INOUT_PORT).
 INOUT_HOST=127.0.0.1 allows only this computer to connect.
@@ -115,6 +116,40 @@ def _is_python_process(pid):
     return "python" in out.lower()
 
 
+def _rotate_log():
+    log = _logfile()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    if log.exists() and log.stat().st_size > LOG_MAX_BYTES:
+        log.replace(log.with_suffix(".log.old"))
+    return log
+
+
+def _start_with_task():
+    """On a computer set up for the Windows kiosk, start In-Out through its startup task. Started
+    any other way, it would stop when whoever started it signs out to give the screen back to the kiosk."""
+    if sys.platform != "win32":
+        return False
+    import wintools
+    if not wintools.boot_task_exists():
+        return False
+    if wintools.run_boot_task():
+        return True
+    print(f'Couldn\'t start the "{wintools.TASK_NAME}" task, so In-Out runs only until you sign out.')
+    return False
+
+
+def _start_detached():
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    exe = pythonw if pythonw.exists() else Path(sys.executable)
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    # On Linux, a session of its own means closing the terminal that started it doesn't stop it.
+    subprocess.Popen([str(exe), str(HERE / "run.py"), "--service"],
+                     cwd=HERE, creationflags=flags, close_fds=True, start_new_session=sys.platform != "win32",
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def start_background():
     if is_running():
         print("In-Out is already running.")
@@ -122,30 +157,40 @@ def start_background():
     if not Path(create_app().config["DATABASE"]).exists():
         print(f"No database yet. Run {SETUP_SCRIPT} first.")
         return 1
-    log = _logfile()
-    log.parent.mkdir(parents=True, exist_ok=True)
-    if log.exists() and log.stat().st_size > LOG_MAX_BYTES:
-        log.replace(log.with_suffix(".log.old"))
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    exe = pythonw if pythonw.exists() else Path(sys.executable)
-    flags = 0
-    if sys.platform == "win32":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-    # On Linux, a session of its own means closing the terminal that started it doesn't stop it.
-    subprocess.Popen([str(exe), str(HERE / "run.py"), "--log", str(log), "--pidfile", str(_pidfile())],
-                     cwd=HERE, creationflags=flags, close_fds=True, start_new_session=sys.platform != "win32",
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not _start_with_task():
+        _start_detached()
     for _ in range(30):
         time.sleep(0.5)
         if is_running():
             print("\n".join(describe(HOST)))
             return 0
+    log = _logfile()
     print(f"In-Out didn't start. The end of {log}:")
-    print("".join(log.read_text(encoding="utf-8", errors="replace").splitlines(True)[-15:]))
+    if log.exists():
+        print("".join(log.read_text(encoding="utf-8", errors="replace").splitlines(True)[-15:]))
     return 1
 
 
+def _end_task():
+    """In-Out started by the Windows startup task belongs to Task Scheduler, and only it may end
+    it (taskkill is refused). True once it has stopped."""
+    if sys.platform != "win32" or not is_running():
+        return False
+    import wintools
+    if not (wintools.boot_task_exists() and wintools.end_boot_task()):
+        return False
+    for _ in range(20):
+        if not is_running():
+            return True
+        time.sleep(0.25)
+    return False  # not the task's after all (it fell back to a plain start): the pid file's turn
+
+
 def stop_background():
+    if _end_task():
+        _pidfile().unlink(missing_ok=True)
+        print("In-Out stopped.")
+        return 0
     pidfile = _pidfile()
     pid = int(pidfile.read_text()) if pidfile.exists() else None
     if pid is None or not _is_python_process(pid):
@@ -216,8 +261,8 @@ def main():
     parser.add_argument("--background", action="store_true", help="run with no window")
     parser.add_argument("--stop", action="store_true", help="stop the background server")
     parser.add_argument("--open", action="store_true", help="open In-Out in the browser")
-    parser.add_argument("--log", help=argparse.SUPPRESS)
-    parser.add_argument("--pidfile", help=argparse.SUPPRESS)
+    # The server itself, with no window: what --background and the Windows startup task run.
+    parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.stop:
@@ -229,7 +274,10 @@ def main():
         sys.exit(code)
     if args.open:
         sys.exit(open_browser())
-    serve(args.log, args.pidfile)
+    if args.service:
+        serve(str(_rotate_log()), str(_pidfile()))
+    else:
+        serve()
 
 
 if __name__ == "__main__":

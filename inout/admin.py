@@ -1,4 +1,4 @@
-"""Admin pages: timesheets, CSV export, user approval, PINs and cards, fixing a day."""
+"""Admin pages: timesheets, CSV export, user approval, PINs and cards, admins, fixing a day."""
 import csv
 import io
 import sqlite3
@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace as NS
 
 from flask import Blueprint, Response, abort, flash, g, redirect, render_template, request, url_for
+from werkzeug.security import generate_password_hash
 
 from . import credentials, days, timesheet
 from .auth import admin_required, card_reader
@@ -116,6 +117,59 @@ def create_user():
     return redirect(url_for("admin.users"))
 
 
+ADMIN_PASSWORD_MIN = 8  # the same as manage.py create-admin
+
+
+def _admin_form():
+    """The username (as admins type it to sign in) and password from a Make admin or Add an admin form."""
+    return request.form.get("username", "").strip().lower(), request.form.get("password", "")
+
+
+def _admin_form_problem(db, username, password, for_user_id=None):
+    if not username or len(username) > 40 or any(ch.isspace() for ch in username):
+        return "Pick a username of up to 40 characters, with no spaces."
+    if db.execute("SELECT 1 FROM users WHERE username = ? AND id IS NOT ?", (username, for_user_id)).fetchone():
+        return f"The username {username} is taken. Pick another."
+    if len(password) < ADMIN_PASSWORD_MIN:
+        return f"The password needs at least {ADMIN_PASSWORD_MIN} characters."
+    if password != request.form.get("confirm", ""):
+        return "The two passwords didn't match."
+    return None
+
+
+@bp.route("/users/new-admin", methods=["POST"])
+@admin_required
+def create_admin():
+    """A new person who signs in to the admin pages. The PIN is optional, for admins who clock in too."""
+    db = get_db()
+    name = " ".join(request.form.get("display_name", "").split())[:80]
+    pin = request.form.get("pin", "").strip()
+    username, password = _admin_form()
+    problem = ("Please enter a name." if not name else
+               _admin_form_problem(db, username, password) or (credentials.pin_problem(pin) if pin else None))
+    if problem:
+        flash(problem, "error")
+        return redirect(url_for("admin.users"))
+    at = timesheet.now()
+    try:
+        with transaction(db):
+            user_id = db.execute(
+                "INSERT INTO users (display_name, username, password_hash, is_admin, status, created_at) "
+                "VALUES (?, ?, ?, 1, 'active', ?)",
+                (name, username, generate_password_hash(password), at.isoformat())).lastrowid
+            if pin:
+                credentials.set_secret(user_id, "pin", pin, at)
+            days.log(g.admin.id, "create_admin", f"Added {name} as an admin ({username})", at)
+    except credentials.CredentialTaken:
+        flash("Someone else already has that PIN. Pick a different one, or leave it empty.", "error")
+        return redirect(url_for("admin.users"))
+    except sqlite3.IntegrityError:  # the same username saved a moment ago from another screen
+        flash(f"The username {username} is taken. Pick another.", "error")
+        return redirect(url_for("admin.users"))
+    flash(f"Added {name} as an admin. They sign in with the username {username}.", "success")
+    return redirect(url_for("admin.users"))
+
+
 _ACTIONS = {
     "approve": "Approved {name}.",
     "reject": "Rejected {name}'s request.",
@@ -123,6 +177,8 @@ _ACTIONS = {
     "enable": "Re-enabled {name}.",
     "set_pin": "Set a new PIN for {name}.",
     "remove_card": "Removed {name}'s card.",
+    "make_admin": "Made {name} an admin.",
+    "remove_admin": "{name} is no longer an admin.",
 }
 
 
@@ -133,11 +189,13 @@ def user_update(user_id):
     if action not in _ACTIONS:
         abort(400)
     db = get_db()
-    user = db.execute("SELECT id, display_name, status FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT id, display_name, status, is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
     if user is None:
         abort(404)
-    if user_id == g.admin.id and action == "disable":
-        flash("You can't disable your own account.", "error")
+    # Never your own: then whoever is signed in stays an admin, so there's always at least one.
+    if user_id == g.admin.id and action in ("disable", "remove_admin"):
+        flash("You can't disable your own account." if action == "disable" else
+              "You can't remove your own admin access. Another admin can.", "error")
         return redirect(url_for("admin.users"))
 
     at = timesheet.now()
@@ -160,13 +218,32 @@ def user_update(user_id):
                 credentials.set_secret(user_id, "pin", pin, at)
             elif action == "remove_card":
                 credentials.remove_secret(user_id, "nfc")
+            elif action == "make_admin" and user["status"] == "active" and not user["is_admin"]:
+                username, password = _admin_form()
+                problem = _admin_form_problem(db, username, password, for_user_id=user_id)
+                if problem:
+                    flash(problem, "error")
+                    return redirect(url_for("admin.users"))
+                db.execute("UPDATE users SET is_admin = 1, username = ?, password_hash = ? WHERE id = ?",
+                           (username, generate_password_hash(password), user_id))
+            elif action == "remove_admin" and user["is_admin"]:
+                # They stay on as an employee, PIN and card included. Their username is freed,
+                # and an admin session they have open ends on its next page.
+                db.execute("UPDATE users SET is_admin = 0, username = NULL, password_hash = NULL WHERE id = ?",
+                           (user_id,))
             else:
                 abort(400)
             days.log(g.admin.id, action, _ACTIONS[action].format(name=name), at)
     except credentials.CredentialTaken:
         flash("Someone else already has that PIN. Pick a different one.", "error")
         return redirect(url_for("admin.users"))
-    flash(_ACTIONS[action].format(name=name), "success")
+    except sqlite3.IntegrityError:  # the same username saved a moment ago from another screen
+        flash("That username is taken. Pick another.", "error")
+        return redirect(url_for("admin.users"))
+    message = _ACTIONS[action].format(name=name)
+    if action == "make_admin":
+        message += f" They sign in with the username {username}."
+    flash(message, "success")
     return redirect(url_for("admin.users"))
 
 
