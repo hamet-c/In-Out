@@ -94,6 +94,24 @@ def audit_for_day(day_id):
             for r in rows]
 
 
+def audit_page(limit, before_id=None):
+    """Changes of every kind, newest first: those to a day (which get a `day` with id, work_date
+    and whose it is) and those to people (day is None). before_id continues an earlier page."""
+    rows = get_db().execute(
+        "SELECT a.id, a.created_at, a.detail, a.workday_id, w.work_date, wu.display_name AS day_user, "
+        "COALESCE(u.display_name, 'Deleted user') AS actor "
+        "FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id "
+        "LEFT JOIN workdays w ON w.id = a.workday_id LEFT JOIN users wu ON wu.id = w.user_id "
+        "WHERE ? IS NULL OR a.id < ? ORDER BY a.id DESC LIMIT ?",
+        (before_id, before_id, limit),
+    )
+    return [NS(id=r["id"], created_at=_dt(r["created_at"]), detail=r["detail"],
+               actor=NS(display_name=r["actor"]),
+               day=NS(id=r["workday_id"], work_date=date.fromisoformat(r["work_date"]),
+                      user=NS(display_name=r["day_user"])) if r["workday_id"] else None)
+            for r in rows]
+
+
 def log(actor_id, action, detail, at, workday_id=None):
     get_db().execute(
         "INSERT INTO audit_log (actor_id, workday_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?)",

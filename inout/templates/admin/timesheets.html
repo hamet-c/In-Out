@@ -7,9 +7,14 @@
                     total_seconds, status, is_open, note
     total_seconds   sum over rows
     attention       number of rows that are not submitted or still clocked in
+    today           date, the latest day "Add a day" accepts
+    email           saved email settings: ready, host, port, user, has_password (never the password
+                    itself), last_to (where the last CSV went)
+  "Email CSV" posts the address to admin.email_csv; "Email settings" posts to admin.email_settings.
+  "Add a day" posts user_id and work_date to admin.day_new, which opens that day's page.
 #}
 {% extends "base.html" %}
-{% from "_macros.html" import status, punches with context %}
+{% from "_macros.html" import csrf, status, punches with context %}
 {% block title %}Timesheets{% endblock %}
 {% block content %}
 <h1>Timesheets</h1>
@@ -26,8 +31,30 @@
     </select>
   </label>
   <button class="button button-primary" type="submit">Show</button>
-  <a class="button" href="{{ url_for('admin.export_csv', start=start.isoformat(), end=end.isoformat(), user_id=user_id or '') }}" download>Export CSV</a>
 </form>
+
+{# Both send what the table shows: the range and person last pressed Show for. #}
+{% set shown = {'start': start.isoformat(), 'end': end.isoformat(), 'user_id': user_id or ''} %}
+<div class="export">
+  <a class="button" href="{{ url_for('admin.export_csv', **shown) }}" download>Export CSV</a>
+  <details class="inline">
+    <summary class="button">Email CSV</summary>
+    {% if email.ready %}
+      <form method="post" action="{{ url_for('admin.email_csv', **shown) }}" class="popover popover-under" data-once>
+        {{ csrf() }}
+        <label>Send to
+          <input type="email" name="to" value="{{ email.last_to or email.user }}" autocomplete="email" required>
+        </label>
+        <button class="button button-primary" type="submit">Send</button>
+        <p class="muted">Sends from {{ email.user }}. Change it under <a href="#email-settings">Email settings</a>.</p>
+      </form>
+    {% else %}
+      <div class="popover popover-under">
+        <p>Email isn't set up yet. Fill in <a href="#email-settings">Email settings</a> at the bottom of this page first.</p>
+      </div>
+    {% endif %}
+  </details>
+</div>
 
 <p class="summary">
   {{ rows|length }} day{{ 's' if rows|length != 1 }} · {{ total_seconds|hm }} total
@@ -60,4 +87,35 @@
 {% else %}
   <p class="muted">No time recorded in this range.</p>
 {% endif %}
+
+<h2>Add a day</h2>
+<p class="muted">For a day someone never clocked in on. You type in their times on the next page.</p>
+<form method="post" action="{{ url_for('admin.day_new') }}" class="filters" data-once>
+  {{ csrf() }}
+  <label>Employee
+    <select name="user_id" required>
+      <option value="">Choose…</option>
+      {% for u in users %}
+        <option value="{{ u.id }}"{{ ' selected' if u.id == user_id }}>{{ u.display_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Date <input type="date" name="work_date" max="{{ today.isoformat() }}" required></label>
+  <button class="button" type="submit">Add day</button>
+</form>
+
+<h2 id="email-settings">Email settings</h2>
+<p class="muted">The email account <b>Email CSV</b> sends from. For Gmail: server smtp.gmail.com, port 587,
+  your Gmail address, and an <b>app password</b>, not your normal password. Make one at
+  myaccount.google.com/apppasswords. It needs 2-Step Verification turned on.</p>
+<form method="post" action="{{ url_for('admin.email_settings', **shown) }}" class="filters" data-once>
+  {{ csrf() }}
+  <label>Email server <input name="smtp_host" value="{{ email.host or 'smtp.gmail.com' }}" required></label>
+  <label>Port <input name="smtp_port" type="number" min="1" max="65535" value="{{ email.port or 587 }}" required></label>
+  <label>Send from <input type="email" name="smtp_user" value="{{ email.user }}" autocomplete="off" required></label>
+  <label>{{ 'New password (blank keeps it)' if email.has_password else 'Password' }}
+    <input type="password" name="smtp_password" autocomplete="new-password"{{ ' required' if not email.has_password }}>
+  </label>
+  <button class="button" type="submit">Save</button>
+</form>
 {% endblock %}

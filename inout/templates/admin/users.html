@@ -7,6 +7,7 @@
   Actions post to admin.user_update with an "action" field:
     approve | reject | disable | enable | set_pin (+ pin) | remove_card
     make_admin (+ username, password, confirm) | remove_admin
+    set_password (+ password, confirm, and current when it's your own)
   Cards are linked on their own page, admin.link_card. New admins come from admin.create_admin
   (or `python manage.py create-admin` on the server).
 #}
@@ -29,17 +30,21 @@
   </label>
 {%- endmacro %}
 
+{% macro password_fields(what='Password') -%}
+  <label>{{ what }}, 8+ characters
+    <input type="password" name="password" minlength="8" autocomplete="new-password" required>
+  </label>
+  <label>{{ what }} again
+    <input type="password" name="confirm" minlength="8" autocomplete="new-password" required>
+  </label>
+{%- endmacro %}
+
 {% macro admin_fields() -%}
   <label>Username (for the admin sign-in)
     <input name="username" maxlength="40" pattern="\S+" title="No spaces" autocomplete="off"
            autocapitalize="none" spellcheck="false" required>
   </label>
-  <label>Password, 8+ characters
-    <input type="password" name="password" minlength="8" autocomplete="new-password" required>
-  </label>
-  <label>Password again
-    <input type="password" name="confirm" minlength="8" autocomplete="new-password" required>
-  </label>
+  {{ password_fields() }}
 {%- endmacro %}
 
 {% block content %}
@@ -110,6 +115,25 @@
                   <p class="muted">{{ u.display_name }} will sign in to the admin pages with these.</p>
                   {{ admin_fields() }}
                   <button class="button button-small button-primary" type="submit">Make admin</button>
+                </form>
+              </details>
+            {% endif %}
+            {% if u.is_admin %}
+              {% set own = u.id == current_admin.id %}
+              <details class="inline">
+                <summary class="button button-small">{{ 'Change password' if own else 'Reset password' }}</summary>
+                <form method="post" action="{{ url_for('admin.user_update', user_id=u.id) }}" class="popover" data-once>
+                  {{ csrf() }}
+                  <input type="hidden" name="action" value="set_password">
+                  {% if own %}
+                    <label>Your current password
+                      <input type="password" name="current" autocomplete="current-password" required>
+                    </label>
+                  {% else %}
+                    <p class="muted">For when {{ u.display_name }} forgot theirs. Tell them the new one privately.</p>
+                  {% endif %}
+                  {{ password_fields('New password') }}
+                  <button class="button button-small button-primary" type="submit">Save</button>
                 </form>
               </details>
             {% endif %}

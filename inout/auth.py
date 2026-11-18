@@ -8,6 +8,7 @@ Only one person is signed in per browser: a PIN sign-in ends any admin session t
 an admin sign-in ends any employee session. Otherwise an admin who walked away from a
 shared screen would leave the admin pages open to the next person who enters a PIN.
 """
+import math
 import secrets
 import threading
 from collections import defaultdict, deque
@@ -35,14 +36,20 @@ ADMIN_PAGE_IDLE_SECONDS = 5 * 60
 # ---------------------------------------------------------------- wrong-guess lockout
 
 class AttemptLimiter:
-    """Locks a device (IP address) out after too many wrong PINs or passwords.
+    """Makes a device (IP address) wait after wrong PINs or passwords.
+
+    The first `free` wrong tries cost nothing. Each one after that means a wait before the
+    next try: first_pause, then double that, and so on up to max_pause. Guessing gets slow
+    quickly, but a few people's typos never block a shared clock station for long. A wrong
+    try stops counting once it's older than `window`.
 
     A successful sign-in does NOT clear the count. Otherwise someone who knows one valid
-    PIN could interleave it with guesses and never get locked out.
+    PIN could interleave it with guesses and never have to wait.
     """
 
-    def __init__(self, max_failures=5, window=timedelta(minutes=15), lockout=timedelta(minutes=5)):
-        self.max_failures, self.window, self.lockout = max_failures, window, lockout
+    def __init__(self, free=2, first_pause=timedelta(seconds=5), max_pause=timedelta(minutes=5),
+                 window=timedelta(minutes=15)):
+        self.free, self.first_pause, self.max_pause, self.window = free, first_pause, max_pause, window
         self._fails = defaultdict(deque)
         self._lock = threading.Lock()
 
@@ -55,9 +62,11 @@ class AttemptLimiter:
     def seconds_left(self, key, at):
         with self._lock:
             q = self._prune(key, at)
-            if len(q) < self.max_failures:
+            extra = len(q) - self.free
+            if extra <= 0:
                 return 0
-            return max(0, int((q[-1] + self.lockout - at).total_seconds()))
+            pause = min(self.first_pause * 2 ** min(extra - 1, 20), self.max_pause)
+            return max(0, math.ceil((q[-1] + pause - at).total_seconds()))
 
     def fail(self, key, at):
         with self._lock:
@@ -68,13 +77,25 @@ def _limiter():
     return current_app.extensions["inout_limiter"]
 
 
-def _locked_out():
-    """Flash and return True if this device is locked out right now."""
+def _wait(seconds):
+    """45 -> '45 seconds', 61 -> '2 minutes'."""
+    n, unit = (seconds, "second") if seconds < 60 else ((seconds + 59) // 60, "minute")
+    return f"{n} {unit}{'s' if n != 1 else ''}"
+
+
+def locked_out():
+    """Flash and return True if this device has to wait before its next try."""
     left = _limiter().seconds_left(request.remote_addr, timesheet.now())
     if left:
-        minutes = (left + 59) // 60
-        flash(f"Too many wrong tries. Wait {minutes} minute{'s' if minutes != 1 else ''} and try again.", "error")
+        flash(f"Too many wrong tries. Wait {_wait(left)} and try again.", "error")
     return bool(left)
+
+
+def wrong_try():
+    """Count a wrong PIN or password against this device. Returns the seconds it now has to wait."""
+    at = timesheet.now()
+    _limiter().fail(request.remote_addr, at)
+    return _limiter().seconds_left(request.remote_addr, at)
 
 
 # ---------------------------------------------------------------- CSRF
@@ -149,20 +170,22 @@ def admin_required(view):
 def sign_in_with(kind, secret):
     """Shared by the PIN pad and the card reader. Returns True on success.
 
-    Only PINs count toward the lockout. A card ID comes from the reader on the server, never
+    Only PINs count as wrong tries. A card ID comes from the reader on the server, never
     from the browser, so it can't be guessed by typing, and someone tapping a bank card by
-    mistake shouldn't lock the station.
+    mistake shouldn't make the station wait.
     """
     guessable = kind == "pin"
-    if guessable and _locked_out():
+    if guessable and locked_out():
         return False
     user_id = credentials.find_user_id(kind, secret)
     row = _load_user(user_id) if user_id else None
     if row is None:
         if guessable:
-            _limiter().fail(request.remote_addr, timesheet.now())
-        flash("That PIN didn't match anyone. Try again." if guessable
-              else "That card isn't linked to anyone. Ask an admin to link it.", "error")
+            left = wrong_try()
+            flash("That PIN didn't match anyone. "
+                  + (f"Wait {_wait(left)}, then try again." if left else "Try again."), "error")
+        else:
+            flash("That card isn't linked to anyone. Ask an admin to link it.", "error")
         return False
     if row["status"] == "pending":
         flash("Your account is waiting for an admin to approve it.", "warning")
@@ -248,7 +271,7 @@ def register():
         problem = "Please enter your name."
     else:
         problem = credentials.pin_problem(pin_value, form.get("confirm", "").strip())
-    if problem is None and _locked_out():
+    if problem is None and locked_out():
         return render_template("register.html", form=form), 429
     if problem:
         flash(problem, "error")
@@ -263,7 +286,7 @@ def register():
             credentials.set_secret(cur.lastrowid, "pin", pin_value, at)
     except credentials.CredentialTaken:
         # Saying "taken" reveals that this PIN belongs to someone, so these count as wrong guesses.
-        _limiter().fail(request.remote_addr, at)
+        wrong_try()
         flash("That PIN can't be used. Please pick a different one.", "error")
         return render_template("register.html", form=form), 400
 
@@ -275,7 +298,7 @@ def register():
 
 @bp.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
-    if request.method == "POST" and not _locked_out():
+    if request.method == "POST" and not locked_out():
         username = request.form.get("username", "").strip().lower()
         row = get_db().execute(
             "SELECT id, password_hash, status, is_admin FROM users WHERE username = ?", (username,)
@@ -283,7 +306,7 @@ def admin_login():
         ok = (row is not None and row["is_admin"] and row["password_hash"]
               and check_password_hash(row["password_hash"], request.form.get("password", "")))
         if not ok:
-            _limiter().fail(request.remote_addr, timesheet.now())
+            wrong_try()
             flash("Wrong username or password.", "error")
         elif row["status"] != "active":
             flash("This admin account is disabled.", "error")

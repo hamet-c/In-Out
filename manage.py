@@ -2,7 +2,8 @@
 
     python manage.py init-db        create instance/inout.db (once)
     python manage.py create-admin   add an admin who can sign in to the admin pages
-    python manage.py setup          guided setup of both of the above, plus Windows or Linux extras
+    python manage.py reset-password set a new password for an admin who forgot theirs
+    python manage.py setup         guided setup of both of the above, plus Windows or Linux extras
     python manage.py migrate        upgrade the database after new code arrives
     python manage.py backup         copy the database to instance/backups/
     python manage.py update         pull the latest version from GitHub and apply it
@@ -73,6 +74,17 @@ def _ask(prompt, check):
         print(f"  {problem}")
 
 
+def _ask_password(prompt="Password"):
+    while True:
+        password = _hidden(f"{prompt}, 8+ characters: ")
+        if len(password) < 8:
+            print("  Too short.")
+        elif password != _hidden(f"{prompt} again: "):
+            print("  Didn't match.")
+        else:
+            return password
+
+
 def cmd_create_admin(_args):
     db = get_db()
     name = _ask("Full name: ", lambda v: None if v else "Required.")
@@ -80,14 +92,7 @@ def cmd_create_admin(_args):
         "Required." if not v else
         "Already taken." if db.execute("SELECT 1 FROM users WHERE username = ?", (v.lower(),)).fetchone()
         else None)).lower()
-    while True:
-        password = _hidden("Password, 8+ characters: ")
-        if len(password) < 8:
-            print("  Too short.")
-        elif password != _hidden("Password again: "):
-            print("  Didn't match.")
-        else:
-            break
+    password = _ask_password()
     pin = _hidden("Clock-in PIN, 4 digits (press Enter to skip): ").strip()
     while pin and credentials.pin_problem(pin):
         print(f"  {credentials.pin_problem(pin)}")
@@ -105,6 +110,22 @@ def cmd_create_admin(_args):
     except credentials.CredentialTaken:
         sys.exit("Someone else already has that PIN. Nothing was saved; run this again.")
     print(f"Admin {username} created.")
+
+
+def cmd_reset_password(_args):
+    """For an admin who forgot their password when no other admin can reset it on the Users page."""
+    db = get_db()
+    admins = [r["username"] for r in db.execute("SELECT username FROM users WHERE is_admin = 1 ORDER BY username")]
+    if not admins:
+        sys.exit("There's no admin yet. Run: python manage.py create-admin")
+    print("Admins: " + ", ".join(admins))
+    username = _ask("Whose password (username)? ",
+                    lambda v: None if v.lower() in admins else "No admin has that username.").lower()
+    password = _ask_password("New password")
+    with transaction(db):
+        db.execute("UPDATE users SET password_hash = ? WHERE username = ?",
+                   (generate_password_hash(password), username))
+    print(f"Changed the password for {username}.")
 
 
 def cmd_migrate(_args):
@@ -323,6 +344,7 @@ def main():
     sub.add_parser("backup", help="back up the database").set_defaults(func=cmd_backup)
     sub.add_parser("update", help="update from GitHub (used by Update In-Out.bat)").set_defaults(func=cmd_update)
     sub.add_parser("create-admin", help="add an admin account").set_defaults(func=cmd_create_admin)
+    sub.add_parser("reset-password", help="set a new password for an admin who forgot theirs").set_defaults(func=cmd_reset_password)
     args = parser.parse_args()
     with create_app().app_context():
         try:

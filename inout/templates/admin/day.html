@@ -4,6 +4,8 @@
             total_seconds, status, is_open, submitted_at, note
     audit   newest first: created_at, actor (display_name), detail
   Times are entered as HH:MM on day.work_date. Leaving "Out" empty keeps the segment open.
+  A submitted day offers Reopen (admin.day_reopen). Any other day with times, none of them
+  open, offers Submit (admin.day_submit).
 #}
 {% extends "base.html" %}
 {% from "_macros.html" import csrf, status with context %}
@@ -64,6 +66,12 @@
     {{ csrf() }}
     <button class="button" type="submit" data-confirm="Click again to reopen">Reopen day</button>
     <span class="muted">Unlocks the day so {{ day.user.display_name }} can clock in and submit again.</span>
+  </form>
+{% elif day.segments and not day.is_open %}
+  <form method="post" action="{{ url_for('admin.day_submit', day_id=day.id) }}" class="submit" data-once>
+    {{ csrf() }}
+    <button class="button" type="submit" data-confirm="Click again to submit">Submit day</button>
+    <span class="muted">Locks the day as it is now, when {{ day.user.display_name }} didn't submit it.</span>
   </form>
 {% endif %}
 

@@ -1,0 +1,46 @@
+{#
+  Context:
+    entries     newest first: created_at, actor (display_name), detail, and day (id, work_date,
+                user.display_name) for a change to someone's day, or None for a change to people
+    older       the "before" value for the next page, or None on the last page
+    first_page  False once "Older changes" has been followed
+#}
+{% extends "base.html" %}
+{% block title %}Change log{% endblock %}
+{% block content %}
+<h1>Change log</h1>
+<p class="muted">Everything admins have changed, newest first. It can't be edited.</p>
+
+{% if entries %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr><th>When</th><th>Admin</th><th>Change</th></tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+          <tr>
+            <td class="nowrap muted">{{ e.created_at|shortdate }}, {{ e.created_at|clock }}</td>
+            <td class="nowrap">{{ e.actor.display_name }}</td>
+            <td>
+              {% if e.day %}
+                <a href="{{ url_for('admin.day', day_id=e.day.id) }}">{{ e.day.user.display_name }}, {{ e.day.work_date|shortdate }}</a>:
+              {% endif %}
+              {{ e.detail }}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted">No changes yet.</p>
+{% endif %}
+
+{% if older or not first_page %}
+  <p class="submit">
+    {% if not first_page %}<a class="button" href="{{ url_for('admin.change_log') }}">Newest changes</a>{% endif %}
+    {% if older %}<a class="button" href="{{ url_for('admin.change_log', before=older) }}">Older changes</a>{% endif %}
+  </p>
+{% endif %}
+{% endblock %}

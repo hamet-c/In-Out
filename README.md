@@ -132,10 +132,14 @@ Everything else works as on Windows, with `/` in paths and `.venv/bin/` in place
 - **Employees** open the site, enter their PIN (or tap their card at the server computer), and tap **Clock In** or **Clock Out**. After clocking out, they can **Submit day** with an optional note, for example "Forgot to clock in, started at 8:00". Submitting locks the day. The screen signs itself out after 30 seconds without a tap, so a shared station is safe to walk away from.
 - **New employees** tap "Request access", enter their name and choose a PIN. An admin approves them under **Users**.
 - **Admins** sign in from "Admin sign in" on the PIN screen:
-  - **Timesheets:** hours by date range and person, with notes, flagged problems and **Export CSV**.
-  - **Edit:** fix a day's times, add or delete entries, or reopen a submitted day. Every change is recorded in the day's change log.
+  - **Timesheets:** hours by date range and person, with notes, flagged problems and **Export CSV**. In the CSV, a day's total is on that day's first row only, so adding up the column gives the right answer.
+  - **Email CSV** (next to Export CSV): sends the same CSV to an email address. It remembers the last address. Set it up once under **Email settings** at the bottom of the Timesheets page. For Gmail, enter server `smtp.gmail.com`, port `587`, your Gmail address, and an **app password** from myaccount.google.com/apppasswords. That needs 2-Step Verification turned on. Your normal Gmail password won't work. The password is saved in `instance/inout.db` and its backups, so keep those files private.
+  - **Add a day** (under the Timesheets table): for a day someone never clocked in on. Pick the person and the date, then type in their times on the next page.
+  - **Edit:** fix a day's times, add or delete entries, or reopen a submitted day. **Submit day** submits a day for someone who didn't. People can only submit today themselves, so this is how an earlier day stops showing as "Not submitted". Every change is recorded in the day's change log.
   - **Users:** approve or reject requests, add employees, disable people, set or change PINs, and link cards.
-  - **More admins:** on **Users**, **Add an admin** creates a new one with their own username and password. A clock-in PIN is optional. **Make admin** on someone's row gives an employee admin access and keeps their PIN, card and hours. **Remove admin** takes it away again, and they stay on as an employee. You can't remove your own admin access or disable yourself, so there's always at least one admin. These changes are recorded in the database's `audit_log` with who made them, though no page shows them yet.
+  - **More admins:** on **Users**, **Add an admin** creates a new one with their own username and password. A clock-in PIN is optional. **Make admin** on someone's row gives an employee admin access and keeps their PIN, card and hours. **Remove admin** takes it away again, and they stay on as an employee. You can't remove your own admin access or disable yourself, so there's always at least one admin.
+  - **Passwords:** on **Users**, **Change password** on your own row asks for your current password and a new one. **Reset password** on another admin's row sets a new one for an admin who forgot theirs. If the only admin forgot theirs, run `.venv\Scripts\python manage.py reset-password` on the server computer.
+  - **Change log:** everything admins have changed, to people and to days, with who did it and when. Newest first.
 
 ### Card reader
 Employees can tap a card instead of typing their PIN. PINs keep working too.
@@ -151,9 +155,9 @@ Employees can tap a card instead of typing their PIN. PINs keep working too.
 ### Security notes
 - PINs and card IDs are stored as keyed hashes, never as the digits themselves.
 - Only one person is signed in per browser. Entering a PIN signs out any admin on that screen, so an admin who walks away can't leave the admin pages open to the next employee. Admin pages also sign out after 5 minutes without a tap or key press.
-- After 5 wrong PINs within 15 minutes, that device is locked out for 5 minutes. A correct PIN doesn't reset the count. Unknown cards don't count, and cards still work during a lockout. A card ID comes from the reader, not from the browser, so it can't be guessed by typing.
+- Wrong PINs make that device wait. The first two cost nothing, so a typo or two never holds up the clock station. After that, each wrong PIN means a wait before the next try: 5 seconds, then 10, then 20, doubling up to 5 minutes. A wrong try stops counting after 15 minutes. A correct PIN doesn't reset the count. Wrong admin passwords count the same way. Unknown cards don't count, and cards still work during a wait. A card ID comes from the reader, not from the browser, so it can't be guessed by typing.
 - Anyone holding a coworker's card can clock them in, and a card's ID can be copied by someone who gets it close to their own reader. Treat cards like keys. Timesheets show who clocked in when.
-- Because employees choose their own PINs and PINs must be unique, "that PIN can't be used" reveals that someone else has it. These attempts count toward the lockout above. If that's a concern, have admins assign PINs instead.
+- Because employees choose their own PINs and PINs must be unique, "that PIN can't be used" reveals that someone else has it. These attempts count as wrong tries too. If that's a concern, have admins assign PINs instead.
 - In-Out uses plain HTTP, so PINs and admin passwords cross the network unencrypted. Someone else on the same Wi-Fi with the right tools could capture them. Browsers label the site "Not secure" for this reason.
 
 ## Backups

@@ -42,17 +42,40 @@ def test_pending_and_disabled_people_cannot_clock_in(client, make_user, status, 
     assert message in page and "Hi, Alice" not in page
 
 
-def test_lockout_after_five_wrong_pins_and_a_right_pin_does_not_reset_it(client, make_user, clock):
+def test_wrong_pins_mean_a_growing_wait_and_a_right_pin_does_not_reset_it(client, make_user, clock):
     make_user("Alice", pin="2468")
-    for _ in range(4):
-        sign_in_pin(client, "1357")
+    for _ in range(2):  # two typos cost nothing
+        assert "Wait" not in sign_in_pin(client, "1357").get_data(as_text=True)
     assert "Hi, Alice" in sign_in_pin(client, "2468").get_data(as_text=True)
     client.post("/done")
-    sign_in_pin(client, "1357")  # fifth wrong try
+
+    assert "Wait 5 seconds, then try again" in sign_in_pin(client, "1357").get_data(as_text=True)  # the third
     page = sign_in_pin(client, "2468").get_data(as_text=True)
-    assert "Too many wrong tries" in page and "Hi, Alice" not in page
-    clock.value += timedelta(minutes=6)
+    assert "Too many wrong tries. Wait 5 seconds" in page and "Hi, Alice" not in page
+    clock.value += timedelta(seconds=5)
     assert "Hi, Alice" in sign_in_pin(client, "2468").get_data(as_text=True)
+    client.post("/done")
+
+    assert "Wait 10 seconds" in sign_in_pin(client, "1357").get_data(as_text=True)  # the fourth: twice as long
+    clock.value += timedelta(seconds=9)
+    assert "Wait 1 second and" in sign_in_pin(client, "2468").get_data(as_text=True)
+
+
+def test_the_wait_doubles_up_to_five_minutes_and_old_tries_stop_counting():
+    from datetime import datetime
+    from inout.auth import AttemptLimiter
+
+    limiter, at = AttemptLimiter(), datetime(2026, 10, 20, 8, 0)
+    waits = []
+    for _ in range(10):
+        limiter.fail("station", at)
+        waits.append(limiter.seconds_left("station", at))
+    assert waits == [0, 0, 5, 10, 20, 40, 80, 160, 300, 300]
+    assert limiter.seconds_left("a phone", at) == 0  # each device waits for its own wrong tries
+    assert limiter.seconds_left("station", at + timedelta(minutes=5)) == 0
+
+    limiter.fail("station", at + timedelta(minutes=16))  # the ten above are over 15 minutes old
+    assert limiter.seconds_left("station", at + timedelta(minutes=16)) == 0
 
 
 def test_employee_is_signed_out_after_idling(client, make_user, clock):
@@ -78,9 +101,11 @@ def test_register_creates_a_pending_person_with_their_pin(client, query):
 
 def test_register_with_a_taken_pin_counts_as_a_wrong_guess(client, make_user, query):
     make_user("Alice", pin="2468")
-    for i in range(5):
+    for i in range(3):
         r = client.post("/register", data={"display_name": f"X{i}", "pin": "2468", "confirm": "2468"})
         assert r.status_code == 400
+    r = client.post("/register", data={"display_name": "X3", "pin": "5824", "confirm": "5824"})
+    assert r.status_code == 429  # even with a free PIN, until the wait is over
     assert len(query("SELECT id FROM users")) == 1
     assert "Too many wrong tries" in sign_in_pin(client, "2468").get_data(as_text=True)
 

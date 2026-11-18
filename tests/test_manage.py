@@ -1,6 +1,9 @@
+import builtins
+
 import pytest
 
 import manage
+from .conftest import sign_in_admin
 
 
 def type_keys(capsys, keys):
@@ -28,3 +31,23 @@ def test_arrow_and_function_keys_are_ignored(capsys):
 def test_ctrl_c_cancels(capsys):
     with pytest.raises(KeyboardInterrupt):
         type_keys(capsys, "ab\x03")
+
+
+def test_reset_password_gives_an_admin_who_forgot_theirs_a_new_one(app, client, make_user, monkeypatch, capsys):
+    make_user("Dana", admin="boss")
+    typed = iter(["nobody", "Boss"])
+    hidden = iter(["short", "new-password", "new-passw0rd", "new-password", "new-password"])
+    monkeypatch.setattr(builtins, "input", lambda prompt="": next(typed))
+    monkeypatch.setattr(manage, "_hidden", lambda prompt: next(hidden))
+    with app.app_context():
+        manage.cmd_reset_password(None)
+    out = capsys.readouterr().out
+    assert "Admins: boss" in out and "No admin has that username." in out
+    assert "Too short." in out and "Didn't match." in out and "Changed the password for boss." in out
+    assert sign_in_admin(client).status_code == 200  # the old password: the sign-in page again, not in
+    assert sign_in_admin(client, password="new-password").status_code == 302
+
+
+def test_reset_password_needs_an_admin_to_exist(app):
+    with app.app_context(), pytest.raises(SystemExit, match="create-admin"):
+        manage.cmd_reset_password(None)

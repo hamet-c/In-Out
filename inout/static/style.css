@@ -191,6 +191,9 @@ details > summary::-webkit-details-marker { display: none; }
   text-align: left;
   white-space: normal;
 }
+.popover-under { right: auto; } /* opens under its button rather than at the page's right edge */
+.popover p { margin: 0; }
+.export { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 0.5rem; }
 
 @media (max-width: 600px) {
   .who { width: 100%; margin-left: 0; justify-content: space-between; }

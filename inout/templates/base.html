@@ -24,6 +24,7 @@
         {{ navlink('clock.dashboard', 'Clock') }}
         {{ navlink('admin.timesheets', 'Timesheets', also=['admin.day']) }}
         {{ navlink('admin.users', 'Users', badge=pending_count) }}
+        {{ navlink('admin.change_log', 'Change log') }}
       </nav>
       <div class="who" data-idle-signout="{{ admin_idle_seconds }}">
         <span>Admin: {{ current_admin.display_name }}</span>
